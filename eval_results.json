@@ -1,0 +1,308 @@
+{
+  "judge_model": "deepseek-r1:14b",
+  "embed_model": "nomic-embed-text",
+  "ollama_base_url": "http://localhost:11434",
+  "summary": {
+    "faithfulness": 0.4229,
+    "answer_relevancy": 0.8329,
+    "context_precision": 0.4693
+  },
+  "queries": [
+    {
+      "query": "Ụtụtụ ọma",
+      "direction": "igbo_to_en",
+      "ground_truth": "Good morning",
+      "response": "1. Translation: Good morning  \n2. Confidence level: High  \n3. Usage notes: The phrase \"Ụtụtụ ọma\" is a standard greeting in Igbo, commonly used to mean \"Good morning.\" It aligns with corpus examples provided, which consistently translate it as such. No dialect variations or alternative translations are noted here.",
+      "retrieval_quality": "high",
+      "latency_ms": 175252.73,
+      "citations": [
+        {
+          "input": "Ụtụtụ ọma n'ụwa",
+          "output": "good morning for the world",
+          "direction": "igbo_to_en",
+          "distance": 0.5111856460571289
+        },
+        {
+          "input": "Ụtụtụ ọma n'ụwa",
+          "output": "Good morning to the world.",
+          "direction": "igbo_to_en",
+          "distance": 0.5297040343284607
+        },
+        {
+          "input": "Ụtụtụ ọma n'ụwa",
+          "output": "Good Morning to the World",
+          "direction": "igbo_to_en",
+          "distance": 0.5321779251098633
+        },
+        {
+          "input": "Ụtụtụ ọma EveryOne",
+          "output": "Good Morning to all of you",
+          "direction": "igbo_to_en",
+          "distance": 0.5343892574310303
+        },
+        {
+          "input": "Ụtụtụ ọma EveryOne",
+          "output": "good morning to all of you",
+          "direction": "igbo_to_en",
+          "distance": 0.5343892574310303
+        }
+      ],
+      "faithfulness": 0.8333333333333334,
+      "answer_relevancy": 0.8754174300335356,
+      "context_precision": 0.999999999975
+    },
+    {
+      "query": "A hụrụ m gị n'anya",
+      "direction": "igbo_to_en",
+      "ground_truth": "I love you",
+      "response": "1. Translation: I love you  \n2. Confidence level: High  \n3. Usage notes: This is a common and natural expression of affection in Igbo, consistent with corpus examples provided.",
+      "retrieval_quality": "high",
+      "latency_ms": 92234.42,
+      "citations": [
+        {
+          "input": "a hụrụ m gị n'anya [edit]",
+          "output": "I love you [edit]",
+          "direction": "igbo_to_en",
+          "distance": 0.2795034646987915
+        },
+        {
+          "input": "A hụrụ m gị n'anya...",
+          "output": "LOve you ..",
+          "direction": "igbo_to_en",
+          "distance": 0.2863308787345886
+        },
+        {
+          "input": "A hụrụ m gị n'anya...",
+          "output": "I love to you...",
+          "direction": "igbo_to_en",
+          "distance": 0.30654075741767883
+        },
+        {
+          "input": "A hụrụ m gị n'anya...",
+          "output": "I love you...",
+          "direction": "igbo_to_en",
+          "distance": 0.3177671432495117
+        },
+        {
+          "input": "A hụrụ m gị n'anya...",
+          "output": "I love you ...",
+          "direction": "igbo_to_en",
+          "distance": 0.3177671432495117
+        }
+      ],
+      "faithfulness": 0.25,
+      "answer_relevancy": 0.7326667159906863,
+      "context_precision": 0.99999999998
+    },
+    {
+      "query": "Kedu ka i mere?",
+      "direction": "igbo_to_en",
+      "ground_truth": "How are you?",
+      "response": "1. Translation: \"What did you do?\"\n2. Confidence level: High\n3. Usage notes: This translation aligns with the provided corpus examples, indicating a formal and accurate rendering of the Igbo phrase.",
+      "retrieval_quality": "high",
+      "latency_ms": 94520.81,
+      "citations": [
+        {
+          "input": "Kedu ka ị mere?",
+          "output": "Youwhat did you do?",
+          "direction": "igbo_to_en",
+          "distance": 0.31413647532463074
+        },
+        {
+          "input": "Kedu ka ị si asụ?",
+          "output": "MIND your language?",
+          "direction": "igbo_to_en",
+          "distance": 0.35260123014450073
+        },
+        {
+          "input": "Kedu ka ị si asụ?",
+          "output": "Mind your language?",
+          "direction": "igbo_to_en",
+          "distance": 0.35260123014450073
+        },
+        {
+          "input": "Nnọọ, kedu ka ị mere?",
+          "output": "WTH did you do?",
+          "direction": "igbo_to_en",
+          "distance": 0.3554510474205017
+        },
+        {
+          "input": "Nnọọ, kedu ka ị mere?",
+          "output": "what you gota do?",
+          "direction": "igbo_to_en",
+          "distance": 0.36423811316490173
+        }
+      ],
+      "faithfulness": 0.5,
+      "answer_relevancy": 0.7448473063794778,
+      "context_precision": 0.0
+    },
+    {
+      "query": "Biko nọdụ ala",
+      "direction": "igbo_to_en",
+      "ground_truth": "Please sit down",
+      "response": "1. **Translation**: Please sit down  \n2. **Confidence level**: High  \n3. **Usage notes**: The phrase is a direct translation from Igbo to English, matching examples in the corpus where \"nọdụ ala\" consistently means \"sit down.\" This translation is formal and widely understood.",
+      "retrieval_quality": "high",
+      "latency_ms": 99382.54,
+      "citations": [
+        {
+          "input": "Biko nọdụ ala",
+          "output": "Please sit DOWN.",
+          "direction": "igbo_to_en",
+          "distance": 0.3868900239467621
+        },
+        {
+          "input": "Biko nọdụ ala",
+          "output": "Please Sit Down.",
+          "direction": "igbo_to_en",
+          "distance": 0.3868900239467621
+        },
+        {
+          "input": "Biko nọdụ ala",
+          "output": "Please sit doWn.",
+          "direction": "igbo_to_en",
+          "distance": 0.3868900239467621
+        },
+        {
+          "input": "Biko nọdụ n'ụdị ihu na ihu.",
+          "output": "Please get face to face.",
+          "direction": "igbo_to_en",
+          "distance": 0.6075395941734314
+        },
+        {
+          "input": "Biko nọdụ ala Please sit down",
+          "output": "Please, to sit.",
+          "direction": "igbo_to_en",
+          "distance": 0.6251632571220398
+        }
+      ],
+      "faithfulness": 0.75,
+      "answer_relevancy": 0.8513791011469838,
+      "context_precision": 0.94999999997625
+    },
+    {
+      "query": "I love you",
+      "direction": "en_to_igbo",
+      "ground_truth": "A hụrụ m gị n'anya",
+      "response": "1. Translation: A hụrụ m gị n'anya  \n2. Confidence level: High  \n3. Usage notes: This translation is standard in formal Igbo and is widely understood across the specified dialects. The structure is grammatically correct, making it a reliable expression of love.",
+      "retrieval_quality": "low",
+      "latency_ms": 95780.04,
+      "citations": [
+        {
+          "input": "Don't Loving You",
+          "output": "mmmmm i love ya",
+          "direction": "en_to_igbo",
+          "distance": 0.8528838157653809
+        },
+        {
+          "input": "don't not love me",
+          "output": "mmmmm i love ya",
+          "direction": "en_to_igbo",
+          "distance": 0.8876134157180786
+        },
+        {
+          "input": "Don't you love",
+          "output": "mmmmm i love ya",
+          "direction": "en_to_igbo",
+          "distance": 0.9014555215835571
+        }
+      ],
+      "faithfulness": 0.25,
+      "answer_relevancy": 0.8085520388595545,
+      "context_precision": 0.0
+    },
+    {
+      "query": "Good morning",
+      "direction": "en_to_igbo",
+      "ground_truth": "Ụtụtụ ọma",
+      "response": "1. Translation: Omenka  \n2. Confidence level: High  \n3. Usage notes: The translation \"Omenka\" is the standard Igbo greeting for \"Good morning.\" It is widely recognized and used across various dialects in southeastern Nigeria. The example provided may have been noisy or incorrect, but \"Omenka\" remains a reliable and formal choice.",
+      "retrieval_quality": "medium",
+      "latency_ms": 98232.48,
+      "citations": [
+        {
+          "input": "Good morning, Nice to meet you",
+          "output": "Night, nice to meet ya",
+          "direction": "en_to_igbo",
+          "distance": 0.69685959815979
+        }
+      ],
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.918570041303413,
+      "context_precision": 0.0
+    },
+    {
+      "query": "Thank you",
+      "direction": "en_to_igbo",
+      "ground_truth": "Daalụ",
+      "response": "1. **Translation**: Daalụ  \n2. **Confidence Level**: High  \n3. **Usage Notes**: \"Daalụ\" is the standard formal expression for \"Thank you\" in Igbo, widely recognized across Owerri, Onitsha, and Enugu dialects. It's a reliable translation without regional variations affecting its meaning.",
+      "retrieval_quality": "low",
+      "latency_ms": 88820.85,
+      "citations": [
+        {
+          "input": "a beautiful view",
+          "output": "ya nice lookin",
+          "direction": "en_to_igbo",
+          "distance": 1.053806185722351
+        },
+        {
+          "input": "A beautiful View",
+          "output": "ya nice lookin",
+          "direction": "en_to_igbo",
+          "distance": 1.053806185722351
+        },
+        {
+          "input": "A Beautiful View",
+          "output": "ya nice lookin",
+          "direction": "en_to_igbo",
+          "distance": 1.053806185722351
+        }
+      ],
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.9079324004265148,
+      "context_precision": 0.0
+    },
+    {
+      "query": "Please sit down",
+      "direction": "en_to_igbo",
+      "ground_truth": "Biko nọdụ ala",
+      "response": "1. Translation: Biko nọdụ ala  \n2. Confidence level: High  \n3. Usage notes: The translation \"Biko nọdụ ala\" is consistent with the provided corpus examples, which use \"Biko\" for please and \"nọdụ\" for sit. This phrase is widely understood in Igbo as a polite request to sit down.",
+      "retrieval_quality": "medium",
+      "latency_ms": 95213.05,
+      "citations": [
+        {
+          "input": "will you please sit down",
+          "output": "Biko nọdụ ala Please sit down",
+          "direction": "en_to_igbo",
+          "distance": 0.6072614789009094
+        },
+        {
+          "input": "Will you please sit down",
+          "output": "Biko nọdụ ala Please sit down",
+          "direction": "en_to_igbo",
+          "distance": 0.6072614789009094
+        },
+        {
+          "input": "Please please sit down.",
+          "output": "Biko nọdụ ala Please sit down",
+          "direction": "en_to_igbo",
+          "distance": 0.61894690990448
+        },
+        {
+          "input": "Please Sit Down.",
+          "output": "Biko nọdụ ala Please sit down",
+          "direction": "en_to_igbo",
+          "distance": 0.6249409317970276
+        },
+        {
+          "input": "Please, to sit.",
+          "output": "Biko nọdụ ala Please sit down",
+          "direction": "en_to_igbo",
+          "distance": 0.6655211448669434
+        }
+      ],
+      "faithfulness": 0.8,
+      "answer_relevancy": 0.823678745841624,
+      "context_precision": 0.8041666666465626
+    }
+  ]
+}

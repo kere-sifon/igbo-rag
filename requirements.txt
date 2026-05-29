@@ -1,0 +1,9 @@
+chromadb
+langchain
+langchain-community
+langchain-ollama
+fastapi
+uvicorn
+ragas
+sentence-transformers
+python-dotenv
