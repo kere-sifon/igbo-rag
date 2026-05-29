@@ -1,5 +1,11 @@
 # Igbo-English RAG Translator
 
+![Python](https://img.shields.io/badge/Python-3.14-blue)
+![ChromaDB](https://img.shields.io/badge/ChromaDB-9.7M_pairs-green)
+![DeepSeek](https://img.shields.io/badge/LLM-DeepSeek--r1%3A14b-orange)
+![RAGAS](https://img.shields.io/badge/Answer_Relevancy-0.833-brightgreen)
+![Local](https://img.shields.io/badge/Inference-100%25_Local-purple)
+
 A production RAG translation system for Igbo ↔ English, running entirely on local infrastructure — DeepSeek-r1:14b via Ollama, a ChromaDB vector store of 9.7M translation pairs, a FastAPI REST API, and a RAGAS evaluation suite. Zero API costs, zero data leaving the machine.
 
 ## Why I built this
@@ -7,6 +13,12 @@ A production RAG translation system for Igbo ↔ English, running entirely on lo
 Igbo is a low-resource African language. Despite being spoken by tens of millions of people, it is badly underserved by mainstream translation systems — training data is scarce, noisy, and rarely curated, and commercial models treat it as an afterthought.
 
 This project is personal. As someone of Igbo heritage, I want the language to survive the generation gap. I want to be able to teach my children the language with a tool that produces *formal, correct* Igbo rather than transliterated approximations. Cultural preservation of a low-resource language is not a problem you can wait for a vendor to solve — so I built the tooling locally, where the data and the model are both under my control.
+
+## Demo
+
+Integrated with Open WebUI as a dedicated model with tool calling. The system routes each query through the RAG pipeline, returns citations, and surfaces retrieval quality directly in the chat UI.
+
+![Igbo Translator in Open WebUI](docs/demo.png)
 
 ## Architecture
 
@@ -78,27 +90,55 @@ In other words, a low faithfulness score here is a signal that the routing layer
 
 ## Stack
 
-- **ChromaDB** — persistent vector store (9.7M translation pairs)
-- **LangChain** — prompt templating and LLM orchestration
-- **Ollama** — local model server
-- **DeepSeek-r1:14b** — generation + RAGAS judge LLM
-- **nomic-embed-text** — 384-dim embeddings (retrieval + RAGAS)
-- **FastAPI** — REST API
-- **RAGAS** — evaluation suite
-- **Python 3.14**
+| Component | Technology |
+|---|---|
+| Vector store | ChromaDB (9.7M translation pairs) |
+| Embeddings | nomic-embed-text (384-dim, via Ollama) |
+| LLM | DeepSeek-r1:14b (via Ollama) |
+| Orchestration | LangChain |
+| API | FastAPI |
+| Evaluation | RAGAS |
+| UI integration | Open WebUI (tool + dedicated model) |
+| Runtime | Python 3.14, fully local |
+
+## Open WebUI integration
+
+The API is integrated into Open WebUI as a callable Tool and a dedicated **Igbo Translator** model. The model is configured to always invoke the tool rather than translate from memory, ensuring every response is grounded in the corpus and returns retrieval quality + citations.
+
+To enable:
+1. Start the API: `python src/run.py`
+2. In Open WebUI → **Tools** → create a new tool using the code in `src/owui_tool.py`
+3. In **Workspace → Models** → create a model named `Igbo Translator` with base model `deepseek-r1:14b`, the system prompt below, and the Igbo Translator tool enabled
+
+**System prompt for the model:**
+```
+You are an Igbo-English translation assistant powered by a RAG pipeline
+grounded on 9.7 million real Igbo-English translation pairs.
+
+CRITICAL RULES:
+- ALWAYS call the translate_igbo tool for every translation request
+- NEVER translate from memory or your own knowledge
+- Quote the tool's translation EXACTLY as returned — do not paraphrase or reword it
+- Present the full tool response including retrieval quality and citations
+
+When the user gives you text:
+- If it looks like English → call translate_igbo with direction='en_to_igbo'
+- If it looks like Igbo → call translate_igbo with direction='igbo_to_en'
+- If unsure → call translate_igbo with direction=null
+```
 
 ## Setup and run
 
 ### Prerequisites
 
-- [Ollama](https://ollama.com/) running locally with the required models pulled:
+[Ollama](https://ollama.com/) running locally with the required models:
 
 ```bash
 ollama pull deepseek-r1:14b
 ollama pull nomic-embed-text
 ```
 
-- A populated ChromaDB store with an `igbo_translations` collection.
+A populated ChromaDB store at `CHROMA_DB_PATH` with an `igbo_translations` collection.
 
 ### Install
 
@@ -125,7 +165,7 @@ EMBED_MODEL=nomic-embed-text
 python src/run.py
 ```
 
-The server starts on `http://0.0.0.0:8000`. Interactive docs are at `http://localhost:8000/docs`.
+Server starts on `http://0.0.0.0:8000`. Interactive Swagger docs at `http://localhost:8000/docs`.
 
 ### Run the evaluation suite
 
@@ -133,16 +173,15 @@ The server starts on `http://0.0.0.0:8000`. Interactive docs are at `http://loca
 python src/eval.py
 ```
 
-This runs the RAG pipeline over the test set, scores it with RAGAS, prints a per-query table, and writes full results to `eval_results.json`.
+Runs the RAG pipeline over the test set, scores with RAGAS, prints a per-query table, and writes full results to `eval_results.json`.
 
 ## API reference
 
 ### `POST /translate`
 
-Translate a phrase. Returns the translation, retrieval quality, citations, and latency.
+Translate a phrase. Returns translation, retrieval quality, citations, and latency.
 
 **Request**
-
 ```bash
 curl -s -X POST http://localhost:8000/translate \
   -H "Content-Type: application/json" \
@@ -150,7 +189,6 @@ curl -s -X POST http://localhost:8000/translate \
 ```
 
 **Response**
-
 ```json
 {
   "query": "Ụtụtụ ọma",
@@ -169,11 +207,11 @@ curl -s -X POST http://localhost:8000/translate \
 }
 ```
 
-`direction` is optional (`en_to_igbo`, `igbo_to_en`, or omitted to search both). An empty `query` returns **HTTP 422**.
+`direction` is optional (`en_to_igbo`, `igbo_to_en`, or omitted to search both). Empty `query` returns HTTP 422.
 
 ### `GET /health`
 
-Liveness check that connects to ChromaDB and returns the live document count. Returns **HTTP 503** if ChromaDB is unreachable.
+Liveness check. Connects to ChromaDB and returns live document count. Returns HTTP 503 if ChromaDB is unreachable.
 
 ```bash
 curl -s http://localhost:8000/health
@@ -211,3 +249,4 @@ curl -s http://localhost:8000/
 - **Corpus curation** — an offline pass to filter transliterated/noisy pairs out of the 9.7M-pair store, raising the share of `HIGH` retrievals and reducing reliance on the fallback path.
 - **Streaming responses** — token streaming from Ollama to cut perceived latency, which matters with a 14B model running locally.
 - **LangSmith tracing** — end-to-end tracing of retrieval, routing, and generation to debug quality regressions and inspect per-stage latency.
+- **pgvector migration** — move from ChromaDB to pgvector on Postgres for hybrid keyword + semantic search, enabling better precision on exact phrase matches.
