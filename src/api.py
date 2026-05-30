@@ -1,5 +1,7 @@
+import asyncio
 import os
 import time
+from functools import partial
 from typing import Literal
 
 from dotenv import load_dotenv
@@ -10,7 +12,7 @@ from pydantic import BaseModel
 from rag_pipeline import (
     CHROMA_DB_PATH,
     LLM_MODEL,
-    get_chroma_client,
+    get_chroma_collection,
     translate,
 )
 
@@ -80,11 +82,11 @@ def read_root() -> RootResponse:
 
 
 @app.get("/health", response_model=HealthResponse)
-def health() -> HealthResponse:
+async def health() -> HealthResponse:
     try:
-        client = get_chroma_client()
-        col = client.get_collection(COLLECTION_NAME)
-        total_pairs = col.count()
+        col = get_chroma_collection()
+        loop = asyncio.get_event_loop()
+        total_pairs = await loop.run_in_executor(None, col.count)
     except Exception as exc:
         raise HTTPException(
             status_code=503,
@@ -101,15 +103,15 @@ def health() -> HealthResponse:
 
 
 @app.post("/translate", response_model=TranslateResponse)
-def translate_text(request: TranslateRequest) -> TranslateResponse:
+async def translate_text(request: TranslateRequest) -> TranslateResponse:
     if not request.query.strip():
-        raise HTTPException(
-            status_code=422,
-            detail="query must not be empty",
-        )
+        raise HTTPException(status_code=422, detail="query must not be empty")
 
     start = time.perf_counter()
-    result = translate(request.query, direction=request.direction)
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None, partial(translate, request.query, direction=request.direction)
+    )
     latency_ms = (time.perf_counter() - start) * 1000
 
     direction = result["direction"] or "auto"
@@ -122,6 +124,33 @@ def translate_text(request: TranslateRequest) -> TranslateResponse:
         citations=[Citation(**c) for c in result["citations"]],
         latency_ms=round(latency_ms, 2),
     )
+
+
+@app.get("/debug/chroma")
+async def debug_chroma():
+    import time
+    start = time.time()
+    col = get_chroma_collection()
+    chroma_ms = (time.time() - start) * 1000
+    return {
+        "chroma_ms": chroma_ms,
+        "count": col.count()
+    }
+
+
+@app.get("/debug/llm")
+async def debug_llm():
+    import time
+    from langchain_ollama import ChatOllama
+    start = time.time()
+    llm = ChatOllama(model=LLM_MODEL, base_url=OLLAMA_BASE_URL, temperature=0.1)
+    response = llm.invoke("say hi")
+    llm_ms = (time.time() - start) * 1000
+    return {
+        "llm_ms": llm_ms,
+        "model": LLM_MODEL,
+        "response": response.content
+    }
 
 
 if __name__ == "__main__":
