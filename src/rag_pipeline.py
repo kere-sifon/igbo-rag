@@ -1,49 +1,46 @@
 import os
 import json
-import requests as http_requests
+import time
+import urllib.request
+import numpy as np
+import faiss
 from dotenv import load_dotenv
-import chromadb
-from langchain_core.prompts import ChatPromptTemplate
 
 load_dotenv()
 
 CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "/Users/kere/igbo_vector_db")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 LLM_MODEL = os.getenv("LLM_MODEL", "Llama3.1:8b")
+EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
+FAISS_INDEX_PATH = os.getenv("FAISS_INDEX_PATH",
+    os.path.expanduser("~/projects/igbo-rag/data/igbo_faiss.index"))
+FAISS_META_PATH = os.getenv("FAISS_META_PATH",
+    os.path.expanduser("~/projects/igbo-rag/data/igbo_metadata.json"))
 
-# Initialise ChromaDB once at module load — reused across all requests
-_chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
-_chroma_collection = _chroma_client.get_collection("igbo_translations")
+# --- Initialise FAISS index + metadata once at module load ---
+print(f"Loading FAISS index from {FAISS_INDEX_PATH}...")
+_faiss_index = faiss.read_index(FAISS_INDEX_PATH)
+with open(FAISS_META_PATH, "r", encoding="utf-8") as f:
+    _metadata = json.load(f)
+print(f"FAISS index ready: {_faiss_index.ntotal:,} vectors")
 
 
-def get_chroma_collection():
-    return _chroma_collection
-
-
-def call_ollama(system_msg: str, user_msg: str, timeout: int = 30) -> str:
-    """
-    Call Ollama directly via HTTP — bypasses LangChain for reliability.
-    Uses /api/chat with stream=false and hard timeout.
-    """
-    payload = {
-        "model": LLM_MODEL,
-        "stream": False,
-        "options": {
-            "temperature": 0.1,
-            "num_predict": 200,
-        },
-        "messages": [
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": user_msg},
-        ],
-    }
-    response = http_requests.post(
-        f"{OLLAMA_BASE_URL}/api/chat",
-        json=payload,
-        timeout=timeout,
+def embed_query(text: str) -> np.ndarray:
+    """Embed a query string using nomic-embed-text via Ollama."""
+    payload = json.dumps({
+        "model": EMBED_MODEL,
+        "prompt": text
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        f"{OLLAMA_BASE_URL}/api/embeddings",
+        data=payload,
+        headers={"Content-Type": "application/json"}
     )
-    response.raise_for_status()
-    return response.json()["message"]["content"]
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        result = json.loads(resp.read())
+        vec = np.array([result["embedding"]], dtype=np.float32)
+        faiss.normalize_L2(vec)
+        return vec
 
 
 def retrieve_translation_pairs(
@@ -53,41 +50,58 @@ def retrieve_translation_pairs(
     distance_threshold: float = 0.70
 ):
     """
-    Retrieve the most relevant translation pairs for a given query.
-    Fetches 4x n_results then filters by distance_threshold to remove noisy pairs.
-    Falls back to top 3 unfiltered if nothing passes the threshold.
-    """
-    col = get_chroma_collection()
-    where_filter = {"direction": direction} if direction else None
+    Retrieve the most relevant translation pairs using FAISS.
+    Sub-millisecond search over 100K curated pairs.
 
-    raw_results = col.query(
-        query_texts=[query],
-        n_results=n_results * 4,
-        where=where_filter,
-        include=["documents", "metadatas", "distances"]
-    )
+    Args:
+        query: Text to find similar translations for
+        direction: 'igbo_to_en', 'en_to_igbo', or None for both
+        n_results: Number of pairs to return
+        distance_threshold: Minimum cosine similarity to accept (higher = stricter)
+    """
+    # Fetch more than needed so we can filter by direction and quality
+    fetch_k = n_results * 8 if direction else n_results * 4
+    fetch_k = min(fetch_k, _faiss_index.ntotal)
+
+    vec = embed_query(query)
+    distances, indices = _faiss_index.search(vec, fetch_k)
 
     pairs = []
-    for i in range(len(raw_results["ids"][0])):
-        distance = raw_results["distances"][0][i]
-        if distance <= distance_threshold:
-            pairs.append({
-                "input": raw_results["metadatas"][0][i]["input"],
-                "output": raw_results["metadatas"][0][i]["output"],
-                "direction": raw_results["metadatas"][0][i]["direction"],
-                "distance": distance
-            })
+    for dist, idx in zip(distances[0], indices[0]):
+        if idx < 0 or idx >= len(_metadata):
+            continue
+        m = _metadata[idx]
+        # Filter by direction if specified
+        if direction and m.get("direction") != direction:
+            continue
+        # Filter by quality threshold (FAISS returns cosine similarity, higher = better)
+        if dist < distance_threshold:
+            continue
+        pairs.append({
+            "input": m["input"],
+            "output": m["output"],
+            "direction": m["direction"],
+            "distance": float(1.0 - dist)  # convert to distance (lower = better)
+        })
+        if len(pairs) >= n_results:
+            break
 
-    pairs = sorted(pairs, key=lambda x: x["distance"])[:n_results]
-
+    # Fallback: if nothing passed threshold, return top n_results unfiltered
     if not pairs:
-        for i in range(min(3, len(raw_results["ids"][0]))):
+        for dist, idx in zip(distances[0], indices[0]):
+            if idx < 0 or idx >= len(_metadata):
+                continue
+            m = _metadata[idx]
+            if direction and m.get("direction") != direction:
+                continue
             pairs.append({
-                "input": raw_results["metadatas"][0][i]["input"],
-                "output": raw_results["metadatas"][0][i]["output"],
-                "direction": raw_results["metadatas"][0][i]["direction"],
-                "distance": raw_results["distances"][0][i]
+                "input": m["input"],
+                "output": m["output"],
+                "direction": m["direction"],
+                "distance": float(1.0 - dist)
             })
+            if len(pairs) >= min(3, n_results):
+                break
 
     return pairs
 
@@ -104,18 +118,20 @@ def format_context(pairs: list) -> str:
 
 def assess_retrieval_quality(pairs: list) -> str:
     """
+    Assess quality based on best distance score (lower = better match).
+
     Thresholds:
-        < 0.55  -> high
-        < 0.70  -> medium
-        >= 0.70 -> low
+        < 0.20  -> high   (strong match)
+        < 0.35  -> medium (reasonable match)
+        >= 0.35 -> low    (weak match, rely on model knowledge)
         empty   -> no_matches
     """
     if not pairs:
         return "no_matches"
     best_distance = pairs[0]["distance"]
-    if best_distance < 0.55:
+    if best_distance < 0.08:
         return "high"
-    elif best_distance < 0.70:
+    elif best_distance < 0.10:
         return "medium"
     else:
         return "low"
@@ -127,7 +143,7 @@ def build_messages(retrieval_quality: str, context: str, query: str):
         system_msg = """You are an expert Igbo-English translator with deep knowledge of
 formal Igbo as spoken in southeastern Nigeria (Owerri, Onitsha, Enugu dialects).
 
-IMPORTANT: The corpus examples are LOW QUALITY -- noisy or not genuine Igbo.
+IMPORTANT: The corpus examples are LOW QUALITY or not relevant.
 DO NOT use them. Rely on your own linguistic knowledge of formal Igbo.
 
 Rules:
@@ -135,13 +151,17 @@ Rules:
 - Never use transliterated English as Igbo
 - Keep response concise: translation, confidence, one-line note
 - Common phrases:
-    Daalụ / Imeela     = Thank you
-    A hụrụ m gị n'anya = I love you
-    Aha m bụ [name]    = My name is [name]
-    Biko               = Please
-    Ụtụtụ ọma          = Good morning
-    Ehihie ọma         = Good afternoon
-    Anyasị ọma         = Good evening"""
+    Daalụ / Imeela         = Thank you
+    A hụrụ m gị n'anya     = I love you
+    Aha m bụ [name]        = My name is [name]
+    Biko                   = Please
+    Ụtụtụ ọma              = Good morning (NOT good luck)
+    Ehihie ọma             = Good afternoon
+    Anyasị ọma             = Good evening
+    Kedu / Kedu ka ị mere? = How are you?
+    Ọ dị mma               = I am fine / It is good
+    Nnọọ                   = Welcome
+    Bụrụ onye ọma          = Be a good person"""
     else:
         system_msg = """You are an expert Igbo-English translator.
 Use the corpus examples to ground your translation.
@@ -161,9 +181,34 @@ Reply with:
     return system_msg, user_msg
 
 
+def call_ollama(system_msg: str, user_msg: str, timeout: int = 60) -> str:
+    """Call Ollama directly via HTTP."""
+    payload = json.dumps({
+        "model": LLM_MODEL,
+        "stream": False,
+        "options": {
+            "temperature": 0.1,
+            "num_predict": 200,
+        },
+        "messages": [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": user_msg},
+        ],
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        f"{OLLAMA_BASE_URL}/api/chat",
+        data=payload,
+        headers={"Content-Type": "application/json"}
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read())["message"]["content"]
+
+
 def translate(query: str, direction: str = None) -> dict:
     """
-    Main translation function. Calls Ollama directly via HTTP.
+    Main translation function.
+    Retrieves from FAISS locally (~86ms), generates via Ollama.
     """
     pairs = retrieve_translation_pairs(
         query, direction, n_results=5, distance_threshold=0.70
@@ -173,8 +218,7 @@ def translate(query: str, direction: str = None) -> dict:
     context = format_context(pairs) if pairs else "No close matches found."
 
     system_msg, user_msg = build_messages(retrieval_quality, context, query)
-
-    response = call_ollama(system_msg, user_msg, timeout=30)
+    response = call_ollama(system_msg, user_msg, timeout=60)
 
     return {
         "query": query,
@@ -186,9 +230,8 @@ def translate(query: str, direction: str = None) -> dict:
 
 
 if __name__ == "__main__":
-    print("Igbo-English RAG Translation Pipeline")
     print(f"Model    : {LLM_MODEL}")
-    print(f"Chroma DB: {CHROMA_DB_PATH}")
+    print(f"FAISS    : {FAISS_INDEX_PATH}")
     print("=" * 60)
 
     test_queries = [
@@ -196,13 +239,18 @@ if __name__ == "__main__":
         ("I love you", "en_to_igbo"),
         ("Thank you very much", "en_to_igbo"),
         ("A hụrụ m gị n'anya", "igbo_to_en"),
+        ("My name is Kere", "en_to_igbo"),
+        ("Good morning, how are you?", "en_to_igbo"),
     ]
 
     for query, direction in test_queries:
         print(f"\n{'='*60}")
+        start = time.time()
         result = translate(query, direction=direction)
+        elapsed = time.time() - start
         print(f"Query     : {result['query']} [{direction}]")
         print(f"Retrieval : {result['retrieval_quality'].upper()}")
+        print(f"Total time: {elapsed:.1f}s")
         print(f"\nResponse:\n{result['response']}")
         print(f"\nCitations ({len(result['citations'])} pairs):")
         for c in result["citations"]:

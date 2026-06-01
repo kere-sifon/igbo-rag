@@ -10,19 +10,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from rag_pipeline import (
-    CHROMA_DB_PATH,
     LLM_MODEL,
-    get_chroma_collection,
+    FAISS_INDEX_PATH,
     translate,
 )
 
 load_dotenv()
 
-CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", CHROMA_DB_PATH)
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 LLM_MODEL = os.getenv("LLM_MODEL", LLM_MODEL)
+FAISS_INDEX_PATH = os.getenv("FAISS_INDEX_PATH", FAISS_INDEX_PATH)
+FAISS_META_PATH = os.getenv("FAISS_META_PATH",
+    os.path.expanduser("~/projects/igbo-rag/data/igbo_metadata.json"))
 
-COLLECTION_NAME = "igbo_translations"
 APP_NAME = "Igbo-English RAG Translator"
 APP_VERSION = "1.0.0"
 
@@ -46,8 +45,7 @@ class RootResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     model: str
-    chroma_db: str
-    collection: str
+    faiss_index: str
     total_pairs: int
 
 
@@ -83,22 +81,12 @@ def read_root() -> RootResponse:
 
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
-    try:
-        col = get_chroma_collection()
-        loop = asyncio.get_event_loop()
-        total_pairs = await loop.run_in_executor(None, col.count)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="ChromaDB is unreachable",
-        ) from exc
-
+    from rag_pipeline import _faiss_index
     return HealthResponse(
         status="ok",
         model=LLM_MODEL,
-        chroma_db=CHROMA_DB_PATH,
-        collection=COLLECTION_NAME,
-        total_pairs=total_pairs,
+        faiss_index=FAISS_INDEX_PATH,
+        total_pairs=_faiss_index.ntotal,
     )
 
 
@@ -126,34 +114,22 @@ async def translate_text(request: TranslateRequest) -> TranslateResponse:
     )
 
 
-@app.get("/debug/chroma")
-async def debug_chroma():
-    import time
+@app.get("/debug/faiss")
+async def debug_faiss():
+    from rag_pipeline import _faiss_index
     start = time.time()
-    col = get_chroma_collection()
-    chroma_ms = (time.time() - start) * 1000
+    import numpy as np
+    import faiss
+    vec = np.random.rand(1, 768).astype(np.float32)
+    faiss.normalize_L2(vec)
+    distances, indices = _faiss_index.search(vec, 1)
+    search_ms = (time.time() - start) * 1000
     return {
-        "chroma_ms": chroma_ms,
-        "count": col.count()
-    }
-
-
-@app.get("/debug/llm")
-async def debug_llm():
-    import time
-    from langchain_ollama import ChatOllama
-    start = time.time()
-    llm = ChatOllama(model=LLM_MODEL, base_url=OLLAMA_BASE_URL, temperature=0.1)
-    response = llm.invoke("say hi")
-    llm_ms = (time.time() - start) * 1000
-    return {
-        "llm_ms": llm_ms,
-        "model": LLM_MODEL,
-        "response": response.content
+        "search_ms": search_ms,
+        "total_vectors": _faiss_index.ntotal,
     }
 
 
 if __name__ == "__main__":
     import uvicorn
-
-    uvicorn.run("src.api:app", host="0.0.0.0", port=8000)
+    uvicorn.run("api:app", host="0.0.0.0", port=8000)

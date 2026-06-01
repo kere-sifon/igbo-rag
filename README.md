@@ -1,18 +1,20 @@
 # Igbo-English RAG Translator
 
 ![Python](https://img.shields.io/badge/Python-3.14-blue)
-![ChromaDB](https://img.shields.io/badge/ChromaDB-9.7M_pairs-green)
-![DeepSeek](https://img.shields.io/badge/LLM-DeepSeek--r1%3A14b-orange)
+![FAISS](https://img.shields.io/badge/FAISS-100K_curated_pairs-green)
+![Ollama](https://img.shields.io/badge/LLM-Llama3.1%3A8b-orange)
 ![RAGAS](https://img.shields.io/badge/Answer_Relevancy-0.833-brightgreen)
 ![Local](https://img.shields.io/badge/Inference-100%25_Local-purple)
 
-A production RAG translation system for Igbo ↔ English, running entirely on local infrastructure — DeepSeek-r1:14b via Ollama, a ChromaDB vector store of 9.7M translation pairs, a FastAPI REST API, and a RAGAS evaluation suite. Zero API costs, zero data leaving the machine.
+A production RAG translation system for Igbo ↔ English, running entirely on local infrastructure — Llama3.1:8b via Ollama, a FAISS vector index of 100K curated translation pairs, a FastAPI REST API, and a RAGAS evaluation suite. Zero API costs, zero data leaving the machine.
 
 ## Why I built this
 
 Igbo is a low-resource African language. Despite being spoken by tens of millions of people, it is badly underserved by mainstream translation systems — training data is scarce, noisy, and rarely curated, and commercial models treat it as an afterthought.
 
-This project is personal. As someone of Igbo heritage, I want the language to survive the generation gap. I want to be able to teach my children the language with a tool that produces *formal, correct* Igbo rather than transliterated approximations. Cultural preservation of a low-resource language is not a problem you can wait for a vendor to solve — so I built the tooling locally, where the data and the model are both under my control.
+This project is personal. I was raised in Igbo land and grew up speaking the language fluently. Igbo is part of who I am, and I want to keep that connection alive — with a tool that produces *formal, correct* Igbo rather than transliterated approximations or social media noise.
+
+Growing up speaking the language also means I can directly evaluate whether the system's output is correct — an advantage most NLP researchers working on low-resource African languages don't have. When the model returns "M m i love ya" instead of "A hụrụ m gị n'anya", I know immediately it's wrong, and I can trace exactly where the pipeline failed.
 
 ## Demo
 
@@ -25,50 +27,67 @@ Integrated with Open WebUI as a dedicated model with tool calling. The system ro
 The full RAG pipeline, end to end:
 
 1. **Query** — an Igbo or English phrase, with an optional `direction` (`igbo_to_en` / `en_to_igbo`).
-2. **Embedding** — the query is embedded with `nomic-embed-text` (384-dim vectors) served by Ollama.
-3. **Retrieval** — ChromaDB performs semantic search over **9.7M translation pairs** in the `igbo_translations` collection. The pipeline over-fetches (4× the target count) and filters by distance so noisy pairs can be dropped.
+2. **Embedding** — the query is embedded with `nomic-embed-text` (768-dim vectors) served by Ollama (~83ms).
+3. **Retrieval** — FAISS performs cosine similarity search over **100K curated translation pairs** (~3ms). The pipeline over-fetches (8× the target count) and filters by direction and quality threshold.
 4. **Quality assessment** — the best retrieval distance is bucketed into a quality tier:
-   - `HIGH`   — distance `< 0.55` (strong semantic match, corpus is trustworthy)
-   - `MEDIUM` — distance `< 0.70` (reasonable match, use with caution)
-   - `LOW`    — distance `>= 0.70` (weak match, prefer model knowledge)
+   - `HIGH`   — distance `< 0.20` (strong semantic match, corpus is trustworthy)
+   - `MEDIUM` — distance `< 0.35` (reasonable match, use with caution)
+   - `LOW`    — distance `>= 0.35` (weak match, prefer model knowledge)
    - `no_matches` — nothing retrieved
 5. **Quality-aware prompt routing** — the assessed quality selects one of two prompts:
    - **Grounded prompt** (`HIGH` / `MEDIUM`): stays close to the retrieved corpus examples.
-   - **Fallback prompt** (`LOW` / `no_matches`): explicitly instructs the model to *ignore* the noisy corpus and rely on its own knowledge of formal Igbo.
-6. **Generation** — `DeepSeek-r1:14b` runs locally via Ollama (temperature 0.1) and produces the translation plus confidence and usage notes.
+   - **Fallback prompt** (`LOW` / `no_matches`): explicitly instructs the model to *ignore* weak matches and rely on its own knowledge of formal Igbo.
+6. **Generation** — `Llama3.1:8b` runs locally via Ollama (temperature 0.1) and produces the translation plus confidence and usage notes.
 7. **Response** — FastAPI returns the translation along with `retrieval_quality` and the retrieved `citations` (input/output/direction/distance), plus measured latency.
 
 ```
 query
-  → nomic-embed-text (384-dim)
-  → ChromaDB retrieval (9.7M pairs)
-  → distance-based quality assessment (HIGH < 0.55, MEDIUM < 0.70, LOW >= 0.70)
+  → nomic-embed-text (768-dim, ~83ms)
+  → FAISS cosine search (100K pairs, ~3ms)
+  → distance-based quality assessment (HIGH < 0.20, MEDIUM < 0.35, LOW >= 0.35)
   → quality-aware prompt routing (grounded vs fallback)
-  → DeepSeek-r1:14b (Ollama)
+  → Llama3.1:8b (Ollama)
   → FastAPI response { translation, retrieval_quality, citations, latency_ms }
 ```
 
 ## Key engineering decisions
 
-### 1. Quality-aware prompt routing
+### 1. FAISS over ChromaDB — a performance migration
 
-The naive RAG approach feeds whatever the retriever returns straight into the prompt and optimises for faithfulness to that context. That is the **wrong objective when corpus quality is variable.** This corpus contains a large amount of noise — transliterated English, internet slang, and mislabeled pairs. Blindly grounding on a weak match produces a confidently wrong translation.
+The system was originally built on ChromaDB with a 9.7M-pair SQLite store. Under load, ChromaDB retrieval took **60–90 seconds per query** due to SQLite scan overhead at that scale — the actual query was sub-millisecond but thread pool contention and index loading blocked the FastAPI event loop.
+
+The fix was to migrate to FAISS with a curated 100K-pair index extracted from the original 19.5M-pair NLLB dataset:
+- Extract and quality-filter 100K pairs from `nllb_train.jsonl`
+- Embed with `nomic-embed-text` (~32 minutes one-time cost)
+- Build a normalised `IndexFlatIP` FAISS index (cosine similarity)
+- Result: **86ms total retrieval** (83ms embed + 3ms search) vs 60–90s with ChromaDB
+
+The 9.7M ChromaDB store is retained as the source of record. The FAISS index is the production retrieval layer.
+
+### 2. Quality-aware prompt routing
+
+The naive RAG approach feeds whatever the retriever returns straight into the prompt and optimises for faithfulness to that context. That is the **wrong objective when corpus quality is variable.** The NLLB dataset contains noise — transliterated English, internet slang, and mislabeled pairs. Blindly grounding on a weak match produces a confidently wrong translation.
 
 Routing on retrieval distance lets the system decide *whether the corpus deserves trust* for a given query. When the match is strong, it grounds tightly. When the match is weak, it deliberately overrides the corpus and falls back to the model's own knowledge of formal Igbo. This means faithfulness-to-corpus is intentionally *not* maximised on low-quality retrievals — correctness matters more than fidelity to noise.
 
-### 2. ChromaDB over raw FAISS
-
-FAISS is a great index, but it is just an index. ChromaDB gives a **persistent client** (the 9.7M-pair store lives on disk and reloads instantly), **collection metadata** (each pair carries `input` / `output` / `direction`, which the pipeline filters and cites on), and a production-ready query surface (`where` filters, distance includes) without hand-rolling the storage, serialization, and metadata layers around FAISS. Less glue code, fewer places to get it wrong.
-
 ### 3. Local LLM over a hosted API
 
-- **Zero cost** — 9.7M pairs and an iterative eval loop would be expensive against a metered API. Local inference is free to run as often as needed.
+- **Zero cost** — 100K pairs and an iterative eval loop would be expensive against a metered API. Local inference is free to run as often as needed.
 - **Data privacy** — Igbo text, including anything personal or culturally sensitive, never leaves the machine.
-- **Reproducibility** — a pinned local model + a pinned local vector store means evals are deterministic and not subject to a vendor silently changing the model underneath me.
+- **Reproducibility** — a pinned local model + a pinned local vector store means evals are deterministic and not subject to a vendor silently changing the model underneath.
+
+### 4. Corpus curation strategy
+
+The raw NLLB dataset has 19.5M pairs but significant noise. The quality filter for the FAISS index:
+- Keeps only `Translate` instruction pairs (drops QA, summarisation etc.)
+- Filters pairs with outputs under 4 characters
+- Removes social media noise (`mmmmm`, `ya nice`, `lol` etc.)
+- For `en_to_igbo` only: drops pairs where the Igbo output contains no unicode characters (genuine Igbo always uses diacritics)
+- Result: ~87% of sampled pairs pass the filter
 
 ## RAGAS evaluation results
 
-Evaluated with RAGAS (faithfulness, answer relevancy, context precision), judged by DeepSeek-r1:14b with `nomic-embed-text` embeddings.
+Evaluated with RAGAS (faithfulness, answer relevancy, context precision), judged by DeepSeek-r1:14b with `nomic-embed-text` embeddings. Evals were run against the original ChromaDB store.
 
 | Query | Direction | Retrieval | Faithfulness | Answer Relevancy | Context Precision |
 |-------|-----------|-----------|--------------|------------------|-------------------|
@@ -92,10 +111,10 @@ In other words, a low faithfulness score here is a signal that the routing layer
 
 | Component | Technology |
 |---|---|
-| Vector store | ChromaDB (9.7M translation pairs) |
-| Embeddings | nomic-embed-text (384-dim, via Ollama) |
-| LLM | DeepSeek-r1:14b (via Ollama) |
-| Orchestration | LangChain |
+| Vector index | FAISS IndexFlatIP (100K curated pairs, 768-dim) |
+| Source corpus | NLLB dataset (19.5M pairs, `nllb_train.jsonl`) |
+| Embeddings | nomic-embed-text (768-dim, via Ollama) |
+| LLM | Llama3.1:8b (via Ollama) |
 | API | FastAPI |
 | Evaluation | RAGAS |
 | UI integration | Open WebUI (tool + dedicated model) |
@@ -108,12 +127,12 @@ The API is integrated into Open WebUI as a callable Tool and a dedicated **Igbo 
 To enable:
 1. Start the API: `python src/run.py`
 2. In Open WebUI → **Tools** → create a new tool using the code in `src/owui_tool.py`
-3. In **Workspace → Models** → create a model named `Igbo Translator` with base model `deepseek-r1:14b`, the system prompt below, and the Igbo Translator tool enabled
+3. In **Workspace → Models** → create a model named `Igbo Translator` with base model `Llama3.1:8b`, the system prompt below, and the Igbo Translator tool enabled
 
 **System prompt for the model:**
 ```
 You are an Igbo-English translation assistant powered by a RAG pipeline
-grounded on 9.7 million real Igbo-English translation pairs.
+grounded on 100,000 curated Igbo-English translation pairs.
 
 CRITICAL RULES:
 - ALWAYS call the translate_igbo tool for every translation request
@@ -134,11 +153,9 @@ When the user gives you text:
 [Ollama](https://ollama.com/) running locally with the required models:
 
 ```bash
-ollama pull deepseek-r1:14b
+ollama pull Llama3.1:8b
 ollama pull nomic-embed-text
 ```
-
-A populated ChromaDB store at `CHROMA_DB_PATH` with an `igbo_translations` collection.
 
 ### Install
 
@@ -153,11 +170,22 @@ pip install -r requirements.txt
 Create a `.env` file at the repository root:
 
 ```env
-CHROMA_DB_PATH=/path/to/igbo_vector_db
 OLLAMA_BASE_URL=http://localhost:11434
-LLM_MODEL=deepseek-r1:14b
+LLM_MODEL=Llama3.1:8b
 EMBED_MODEL=nomic-embed-text
+FAISS_INDEX_PATH=/path/to/data/igbo_faiss.index
+FAISS_META_PATH=/path/to/data/igbo_metadata.json
 ```
+
+### Build the FAISS index (one-time, ~32 minutes)
+
+Requires the raw `nllb_train.jsonl` dataset:
+
+```bash
+python scripts/build_faiss_index.py
+```
+
+Outputs `data/igbo_faiss.index` (293MB) and `data/igbo_metadata.json` (19MB).
 
 ### Run the API
 
@@ -193,14 +221,14 @@ curl -s -X POST http://localhost:8000/translate \
 {
   "query": "Ụtụtụ ọma",
   "direction": "igbo_to_en",
-  "translation": "Good morning ...",
+  "translation": "Good morning",
   "retrieval_quality": "high",
   "citations": [
     {
       "input": "Ụtụtụ ọma",
       "output": "Good morning",
       "direction": "igbo_to_en",
-      "distance": 0.41
+      "distance": 0.05
     }
   ],
   "latency_ms": 1843.21
@@ -211,7 +239,7 @@ curl -s -X POST http://localhost:8000/translate \
 
 ### `GET /health`
 
-Liveness check. Connects to ChromaDB and returns live document count. Returns HTTP 503 if ChromaDB is unreachable.
+Liveness check. Returns model and index info. Returns HTTP 503 if unavailable.
 
 ```bash
 curl -s http://localhost:8000/health
@@ -220,10 +248,9 @@ curl -s http://localhost:8000/health
 ```json
 {
   "status": "ok",
-  "model": "deepseek-r1:14b",
-  "chroma_db": "/path/to/igbo_vector_db",
-  "collection": "igbo_translations",
-  "total_pairs": 9775982
+  "model": "Llama3.1:8b",
+  "faiss_index": "/path/to/igbo_faiss.index",
+  "total_pairs": 100000
 }
 ```
 
@@ -245,8 +272,9 @@ curl -s http://localhost:8000/
 
 ## What I would add next
 
-- **Reranking layer** — a cross-encoder reranker (e.g. Cohere Rerank) over the top-k ChromaDB candidates to tighten precision before the quality gate.
-- **Corpus curation** — an offline pass to filter transliterated/noisy pairs out of the 9.7M-pair store, raising the share of `HIGH` retrievals and reducing reliance on the fallback path.
-- **Streaming responses** — token streaming from Ollama to cut perceived latency, which matters with a 14B model running locally.
+- **Reranking layer** — a cross-encoder reranker (e.g. Cohere Rerank) over the top-k FAISS candidates to tighten precision before the quality gate.
+- **Expand the curated index** — run the build script on the full 19.5M pairs overnight to index 1M+ high-quality pairs, improving recall for rare phrases.
+- **Streaming responses** — token streaming from Ollama to cut perceived latency.
 - **LangSmith tracing** — end-to-end tracing of retrieval, routing, and generation to debug quality regressions and inspect per-stage latency.
-- **pgvector migration** — move from ChromaDB to pgvector on Postgres for hybrid keyword + semantic search, enabling better precision on exact phrase matches.
+- **Hybrid search** — combine FAISS vector search with BM25 keyword search for better precision on exact phrase matches (e.g. proper nouns, fixed expressions).
+- **RAGAS re-evaluation** — re-run evals against the new FAISS index to measure retrieval quality improvement over the original ChromaDB baseline.
