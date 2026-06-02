@@ -15,6 +15,8 @@ FAISS_INDEX_PATH = os.getenv("FAISS_INDEX_PATH",
     os.path.expanduser("~/projects/igbo-rag/data/igbo_faiss.index"))
 FAISS_META_PATH = os.getenv("FAISS_META_PATH",
     os.path.expanduser("~/projects/igbo-rag/data/igbo_metadata.json"))
+CORRECTIONS_PATH = os.getenv("CORRECTIONS_PATH",
+    os.path.expanduser("~/projects/igbo-rag/data/corrections.jsonl"))
 
 # --- Initialise FAISS index + metadata once at module load ---
 print(f"Loading FAISS index from {FAISS_INDEX_PATH}...")
@@ -22,6 +24,43 @@ _faiss_index = faiss.read_index(FAISS_INDEX_PATH)
 with open(FAISS_META_PATH, "r", encoding="utf-8") as f:
     _metadata = json.load(f)
 print(f"FAISS index ready: {_faiss_index.ntotal:,} vectors")
+
+# --- Corrections store — loaded from file + updated live ---
+_corrections: dict = {}  # key: "query||direction", value: correct_translation
+
+
+def load_corrections(path: str = CORRECTIONS_PATH):
+    """
+    Load corrections from JSONL file into _corrections dict.
+    Called at startup and after every new feedback submission.
+    Takes effect immediately — no restart needed.
+    """
+    global _corrections
+    _corrections = {}
+    if not os.path.exists(path):
+        return
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                c = json.loads(line)
+                key = f"{c['query'].lower().strip()}||{c['direction']}"
+                _corrections[key] = c["correct_translation"]
+            except (json.JSONDecodeError, KeyError):
+                continue
+    print(f"Loaded {len(_corrections)} corrections from {path}")
+
+
+# Load corrections at startup
+load_corrections()
+
+
+def check_correction(query: str, direction: str) -> str | None:
+    """Check if a correction exists for this exact query + direction."""
+    key = f"{query.lower().strip()}||{direction}"
+    return _corrections.get(key)
 
 
 def embed_query(text: str) -> np.ndarray:
@@ -48,16 +87,7 @@ def retrieve_translation_pairs(
     n_results: int = 5,
     distance_threshold: float = 0.70
 ):
-    """
-    Retrieve the most relevant translation pairs using FAISS.
-    Sub-millisecond search over 1M curated pairs.
-
-    Args:
-        query: Text to find similar translations for
-        direction: 'igbo_to_en', 'en_to_igbo', or None for both
-        n_results: Number of pairs to return
-        distance_threshold: Minimum cosine similarity to accept (higher = stricter)
-    """
+    """Retrieve the most relevant translation pairs using FAISS."""
     fetch_k = n_results * 8 if direction else n_results * 4
     fetch_k = min(fetch_k, _faiss_index.ntotal)
 
@@ -82,7 +112,6 @@ def retrieve_translation_pairs(
         if len(pairs) >= n_results:
             break
 
-    # Fallback: if nothing passed threshold, return top n_results unfiltered
     if not pairs:
         for dist, idx in zip(distances[0], indices[0]):
             if idx < 0 or idx >= len(_metadata):
@@ -103,7 +132,6 @@ def retrieve_translation_pairs(
 
 
 def format_context(pairs: list) -> str:
-    """Format retrieved pairs as numbered grounding context for the LLM."""
     lines = []
     for i, p in enumerate(pairs, 1):
         lines.append(
@@ -113,15 +141,6 @@ def format_context(pairs: list) -> str:
 
 
 def assess_retrieval_quality(pairs: list) -> str:
-    """
-    Assess quality based on best distance score (lower = better match).
-
-    Thresholds:
-        < 0.08  -> high   (strong match)
-        < 0.10  -> medium (reasonable match)
-        >= 0.10 -> low    (weak match, rely on model knowledge)
-        empty   -> no_matches
-    """
     if not pairs:
         return "no_matches"
     best_distance = pairs[0]["distance"]
@@ -134,7 +153,6 @@ def assess_retrieval_quality(pairs: list) -> str:
 
 
 def build_messages(retrieval_quality: str, context: str, query: str):
-    """Return (system_msg, user_msg) tuple based on retrieval quality."""
     if retrieval_quality in ("low", "no_matches"):
         system_msg = """You are an expert Igbo-English translator with deep knowledge of
 formal Igbo as spoken in southeastern Nigeria (Owerri, Onitsha, Enugu dialects).
@@ -150,8 +168,8 @@ Rules:
 CRITICAL CORRECTIONS — always use these exact translations, no exceptions:
     "Please sit down"       = "Biko nọdụ ala"  (nọdụ = sit, ala = down/ground)
     "Biko nọdụ ala"         = "Please sit down" (NOT calm down, NOT arrived on Earth)
-    "I miss you"            = "A chefuo m gị"   (NOT Agụụ which means hunger/appetite)
-    "My name is [X]"        = "Aha m bụ [X]"    (m = my/I, NOT ya which means his/her)
+    "I miss you"            = "A chefuo m gị"   (NOT Agụụ which means hunger)
+    "My name is [X]"        = "Aha m bụ [X]"    (m = my, NOT ya = his/her)
     "Come and eat"          = "Bịa rie nri"
 
 Common reference phrases:
@@ -179,7 +197,7 @@ Keep response concise: translation, confidence, one-line note.
 
 CRITICAL CORRECTIONS — always use these exact translations, no exceptions:
     "Biko nọdụ ala"  = "Please sit down" (NOT arrived on Earth, NOT calm down)
-    "My name is [X]" = "Aha m bụ [X]"    (m = my, NOT ya which means his/her)"""
+    "My name is [X]" = "Aha m bụ [X]"    (m = my, NOT ya = his/her)"""
 
     user_msg = f"""Corpus examples:
 {context}
@@ -195,7 +213,6 @@ Reply with:
 
 
 def call_ollama(system_msg: str, user_msg: str, timeout: int = 60) -> str:
-    """Call Ollama directly via HTTP."""
     payload = json.dumps({
         "model": LLM_MODEL,
         "stream": False,
@@ -221,8 +238,22 @@ def call_ollama(system_msg: str, user_msg: str, timeout: int = 60) -> str:
 def translate(query: str, direction: str = None) -> dict:
     """
     Main translation function.
-    Retrieves from FAISS locally (~86ms), generates via Ollama.
+    1. Check corrections store first — if exact match found, return immediately
+    2. Otherwise retrieve from FAISS + generate via Ollama
     """
+    # --- Correction lookup (highest priority) ---
+    if direction:
+        correction = check_correction(query, direction)
+        if correction:
+            return {
+                "query": query,
+                "direction": direction,
+                "response": f"1. {correction}\n2. High\n3. Verified correction from feedback.",
+                "retrieval_quality": "correction",
+                "citations": []
+            }
+
+    # --- Normal RAG pipeline ---
     pairs = retrieve_translation_pairs(
         query, direction, n_results=5, distance_threshold=0.70
     )
@@ -245,15 +276,13 @@ def translate(query: str, direction: str = None) -> dict:
 if __name__ == "__main__":
     print(f"Model    : {LLM_MODEL}")
     print(f"FAISS    : {FAISS_INDEX_PATH}")
+    print(f"Corrections: {len(_corrections)}")
     print("=" * 60)
 
     test_queries = [
         ("Ụtụtụ ọma", "igbo_to_en"),
         ("I love you", "en_to_igbo"),
         ("Thank you very much", "en_to_igbo"),
-        ("A hụrụ m gị n'anya", "igbo_to_en"),
-        ("My name is Kere", "en_to_igbo"),
-        ("Good morning, how are you?", "en_to_igbo"),
         ("Please sit down", "en_to_igbo"),
         ("Biko nọdụ ala", "igbo_to_en"),
         ("I miss you", "en_to_igbo"),
@@ -268,7 +297,4 @@ if __name__ == "__main__":
         print(f"Query     : {result['query']} [{direction}]")
         print(f"Retrieval : {result['retrieval_quality'].upper()}")
         print(f"Total time: {elapsed:.1f}s")
-        print(f"\nResponse:\n{result['response']}")
-        print(f"\nCitations ({len(result['citations'])} pairs):")
-        for c in result["citations"]:
-            print(f"  [{c['distance']:.4f}] \"{c['input']}\" --> \"{c['output']}\"")
+        print(f"Response  : {result['response'].split(chr(10))[0]}")

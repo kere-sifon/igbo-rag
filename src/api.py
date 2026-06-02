@@ -1,8 +1,10 @@
 import asyncio
+import json
 import os
 import time
+from datetime import datetime
 from functools import partial
-from typing import Literal
+from typing import Literal, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -13,6 +15,7 @@ from rag_pipeline import (
     LLM_MODEL,
     FAISS_INDEX_PATH,
     translate,
+    load_corrections,
 )
 
 load_dotenv()
@@ -21,6 +24,8 @@ LLM_MODEL = os.getenv("LLM_MODEL", LLM_MODEL)
 FAISS_INDEX_PATH = os.getenv("FAISS_INDEX_PATH", FAISS_INDEX_PATH)
 FAISS_META_PATH = os.getenv("FAISS_META_PATH",
     os.path.expanduser("~/projects/igbo-rag/data/igbo_metadata.json"))
+CORRECTIONS_PATH = os.getenv("CORRECTIONS_PATH",
+    os.path.expanduser("~/projects/igbo-rag/data/corrections.jsonl"))
 
 APP_NAME = "Igbo-English RAG Translator"
 APP_VERSION = "1.0.0"
@@ -36,6 +41,8 @@ app.add_middleware(
 )
 
 
+# --- Pydantic models ---
+
 class RootResponse(BaseModel):
     name: str
     version: str
@@ -47,6 +54,7 @@ class HealthResponse(BaseModel):
     model: str
     faiss_index: str
     total_pairs: int
+    total_corrections: int
 
 
 class TranslateRequest(BaseModel):
@@ -70,6 +78,22 @@ class TranslateResponse(BaseModel):
     latency_ms: float
 
 
+class FeedbackRequest(BaseModel):
+    query: str
+    direction: Literal["en_to_igbo", "igbo_to_en"]
+    correct_translation: str
+    wrong_translation: Optional[str] = None
+    note: Optional[str] = None
+
+
+class FeedbackResponse(BaseModel):
+    status: str
+    message: str
+    total_corrections: int
+
+
+# --- Endpoints ---
+
 @app.get("/", response_model=RootResponse)
 def read_root() -> RootResponse:
     return RootResponse(
@@ -81,12 +105,13 @@ def read_root() -> RootResponse:
 
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
-    from rag_pipeline import _faiss_index
+    from rag_pipeline import _faiss_index, _corrections
     return HealthResponse(
         status="ok",
         model=LLM_MODEL,
         faiss_index=FAISS_INDEX_PATH,
         total_pairs=_faiss_index.ntotal,
+        total_corrections=len(_corrections),
     )
 
 
@@ -114,12 +139,70 @@ async def translate_text(request: TranslateRequest) -> TranslateResponse:
     )
 
 
+@app.post("/feedback", response_model=FeedbackResponse)
+async def submit_feedback(request: FeedbackRequest) -> FeedbackResponse:
+    """
+    Submit a translation correction.
+    Saves to corrections.jsonl and immediately updates the in-memory
+    reference phrase list so the fix takes effect without a restart.
+    """
+    if not request.query.strip():
+        raise HTTPException(status_code=422, detail="query must not be empty")
+    if not request.correct_translation.strip():
+        raise HTTPException(status_code=422, detail="correct_translation must not be empty")
+
+    correction = {
+        "query": request.query.strip(),
+        "direction": request.direction,
+        "correct_translation": request.correct_translation.strip(),
+        "wrong_translation": request.wrong_translation,
+        "note": request.note,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+    # Save to corrections.jsonl
+    os.makedirs(os.path.dirname(CORRECTIONS_PATH), exist_ok=True)
+    with open(CORRECTIONS_PATH, "a", encoding="utf-8") as f:
+        f.write(json.dumps(correction, ensure_ascii=False) + "\n")
+
+    # Reload corrections into memory immediately — no restart needed
+    load_corrections(CORRECTIONS_PATH)
+
+    from rag_pipeline import _corrections
+    total = len(_corrections)
+
+    return FeedbackResponse(
+        status="ok",
+        message=f"Correction saved: '{request.query}' = '{request.correct_translation}'",
+        total_corrections=total,
+    )
+
+
+@app.get("/feedback/list")
+async def list_feedback():
+    """List all saved corrections."""
+    if not os.path.exists(CORRECTIONS_PATH):
+        return {"corrections": [], "total": 0}
+
+    corrections = []
+    with open(CORRECTIONS_PATH, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                try:
+                    corrections.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+
+    return {"corrections": corrections, "total": len(corrections)}
+
+
 @app.get("/debug/faiss")
 async def debug_faiss():
     from rag_pipeline import _faiss_index
-    start = time.time()
     import numpy as np
     import faiss
+    start = time.time()
     vec = np.random.rand(1, 768).astype(np.float32)
     faiss.normalize_L2(vec)
     distances, indices = _faiss_index.search(vec, 1)
