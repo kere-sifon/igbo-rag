@@ -26,7 +26,7 @@ JSONL_PATH = "/Volumes/EDD/Downloads/nllb_train.jsonl"
 OUTPUT_DIR = os.path.expanduser("~/projects/igbo-rag/data")
 OLLAMA_URL = "http://localhost:11434/api/embeddings"
 EMBED_MODEL = "nomic-embed-text"
-TARGET_PAIRS = 100_000
+TARGET_PAIRS = 1_000_000
 BATCH_SIZE = 50
 
 

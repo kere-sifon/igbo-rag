@@ -8,9 +8,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "/Users/kere/igbo_vector_db")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-LLM_MODEL = os.getenv("LLM_MODEL", "Llama3.1:8b")
+LLM_MODEL = os.getenv("LLM_MODEL", "Qwen2.5:7B")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
 FAISS_INDEX_PATH = os.getenv("FAISS_INDEX_PATH",
     os.path.expanduser("~/projects/igbo-rag/data/igbo_faiss.index"))
@@ -51,7 +50,7 @@ def retrieve_translation_pairs(
 ):
     """
     Retrieve the most relevant translation pairs using FAISS.
-    Sub-millisecond search over 100K curated pairs.
+    Sub-millisecond search over 1M curated pairs.
 
     Args:
         query: Text to find similar translations for
@@ -59,7 +58,6 @@ def retrieve_translation_pairs(
         n_results: Number of pairs to return
         distance_threshold: Minimum cosine similarity to accept (higher = stricter)
     """
-    # Fetch more than needed so we can filter by direction and quality
     fetch_k = n_results * 8 if direction else n_results * 4
     fetch_k = min(fetch_k, _faiss_index.ntotal)
 
@@ -71,17 +69,15 @@ def retrieve_translation_pairs(
         if idx < 0 or idx >= len(_metadata):
             continue
         m = _metadata[idx]
-        # Filter by direction if specified
         if direction and m.get("direction") != direction:
             continue
-        # Filter by quality threshold (FAISS returns cosine similarity, higher = better)
         if dist < distance_threshold:
             continue
         pairs.append({
             "input": m["input"],
             "output": m["output"],
             "direction": m["direction"],
-            "distance": float(1.0 - dist)  # convert to distance (lower = better)
+            "distance": float(1.0 - dist)
         })
         if len(pairs) >= n_results:
             break
@@ -121,9 +117,9 @@ def assess_retrieval_quality(pairs: list) -> str:
     Assess quality based on best distance score (lower = better match).
 
     Thresholds:
-        < 0.20  -> high   (strong match)
-        < 0.35  -> medium (reasonable match)
-        >= 0.35 -> low    (weak match, rely on model knowledge)
+        < 0.08  -> high   (strong match)
+        < 0.10  -> medium (reasonable match)
+        >= 0.10 -> low    (weak match, rely on model knowledge)
         empty   -> no_matches
     """
     if not pairs:
@@ -150,23 +146,40 @@ Rules:
 - Use standard formal Igbo only
 - Never use transliterated English as Igbo
 - Keep response concise: translation, confidence, one-line note
-- Common phrases:
-    Daalụ / Imeela         = Thank you
-    A hụrụ m gị n'anya     = I love you
-    Aha m bụ [name]        = My name is [name]
-    Biko                   = Please
-    Ụtụtụ ọma              = Good morning (NOT good luck)
-    Ehihie ọma             = Good afternoon
-    Anyasị ọma             = Good evening
-    Kedu / Kedu ka ị mere? = How are you?
-    Ọ dị mma               = I am fine / It is good
-    Nnọọ                   = Welcome
-    Bụrụ onye ọma          = Be a good person"""
+
+CRITICAL CORRECTIONS — always use these exact translations, no exceptions:
+    "Please sit down"       = "Biko nọdụ ala"  (nọdụ = sit, ala = down/ground)
+    "Biko nọdụ ala"         = "Please sit down" (NOT calm down, NOT arrived on Earth)
+    "I miss you"            = "A chefuo m gị"   (NOT Agụụ which means hunger/appetite)
+    "My name is [X]"        = "Aha m bụ [X]"    (m = my/I, NOT ya which means his/her)
+    "Come and eat"          = "Bịa rie nri"
+
+Common reference phrases:
+    Daalụ / Imeela          = Thank you
+    Daalụ nke ukwuu         = Thank you very much (emphatic)
+    A hụrụ m gị n'anya      = I love you
+    Aha m bụ [name]         = My name is [name]
+    Biko                    = Please
+    Ụtụtụ ọma               = Good morning (NOT good luck)
+    Ehihie ọma              = Good afternoon
+    Anyasị ọma              = Good evening
+    Kedu                    = How are you? (NOT I am fine)
+    Kedu ka ị mere?         = How are you? (formal)
+    Ọ dị mma                = I am fine / It is good
+    Nnọọ                    = Welcome
+    Njem ọma                = Safe journey
+    Chukwu gozie gị         = God bless you
+    A chefuo m gị           = I miss you
+    Amara m                 = Congratulations"""
     else:
         system_msg = """You are an expert Igbo-English translator.
 Use the corpus examples to ground your translation.
 If examples are noisy, use your own knowledge instead.
-Keep response concise: translation, confidence, one-line note."""
+Keep response concise: translation, confidence, one-line note.
+
+CRITICAL CORRECTIONS — always use these exact translations, no exceptions:
+    "Biko nọdụ ala"  = "Please sit down" (NOT arrived on Earth, NOT calm down)
+    "My name is [X]" = "Aha m bụ [X]"    (m = my, NOT ya which means his/her)"""
 
     user_msg = f"""Corpus examples:
 {context}
@@ -241,6 +254,10 @@ if __name__ == "__main__":
         ("A hụrụ m gị n'anya", "igbo_to_en"),
         ("My name is Kere", "en_to_igbo"),
         ("Good morning, how are you?", "en_to_igbo"),
+        ("Please sit down", "en_to_igbo"),
+        ("Biko nọdụ ala", "igbo_to_en"),
+        ("I miss you", "en_to_igbo"),
+        ("Come and eat", "en_to_igbo"),
     ]
 
     for query, direction in test_queries:
