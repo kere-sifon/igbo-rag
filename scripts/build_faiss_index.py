@@ -7,7 +7,9 @@ Builds a FAISS index from nllb_train.jsonl:
 3. Saves FAISS index + metadata to ~/projects/igbo-rag/data/
 
 Usage:
-    python scripts/build_faiss_index.py
+    python scripts/build_faiss_index.py /path/to/nllb_train.jsonl
+
+    The JSONL path can also be set via the JSONL_PATH environment variable.
 
 Outputs:
     data/igbo_faiss.index        - FAISS index
@@ -17,17 +19,22 @@ Outputs:
 
 import json
 import os
+import sys
 import time
 import urllib.request
 import numpy as np
 
 # --- Config ---
-JSONL_PATH = "/Volumes/EDD/Downloads/nllb_train.jsonl"
-OUTPUT_DIR = os.path.expanduser("~/projects/igbo-rag/data")
-OLLAMA_URL = "http://localhost:11434/api/embeddings"
-EMBED_MODEL = "nomic-embed-text"
-TARGET_PAIRS = 1_000_000
-BATCH_SIZE = 50
+JSONL_PATH = (
+    sys.argv[1]
+    if len(sys.argv) > 1
+    else os.getenv("JSONL_PATH")
+)
+OUTPUT_DIR = os.getenv("OUTPUT_DIR", os.path.expanduser("~/projects/igbo-rag/data"))
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/embeddings")
+EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
+TARGET_PAIRS = int(os.getenv("TARGET_PAIRS", "1000000"))
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "50"))
 
 
 # Quality filter
@@ -98,6 +105,11 @@ def detect_embed_dim() -> int:
 
 
 def main():
+    if not JSONL_PATH:
+        print("Error: provide the JSONL path as an argument or set JSONL_PATH env var.")
+        print("  Usage: python scripts/build_faiss_index.py /path/to/nllb_train.jsonl")
+        sys.exit(1)
+
     try:
         import faiss
     except ImportError:
