@@ -36,8 +36,9 @@ def load_corrections(path: str = CORRECTIONS_PATH):
     Takes effect immediately — no restart needed.
     """
     global _corrections
-    _corrections = {}
+    new_corrections = {}
     if not os.path.exists(path):
+        _corrections = new_corrections
         return
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -47,9 +48,10 @@ def load_corrections(path: str = CORRECTIONS_PATH):
             try:
                 c = json.loads(line)
                 key = f"{c['query'].lower().strip()}||{c['direction']}"
-                _corrections[key] = c["correct_translation"]
+                new_corrections[key] = c["correct_translation"]
             except (json.JSONDecodeError, KeyError):
                 continue
+    _corrections = new_corrections
     print(f"Loaded {len(_corrections)} corrections from {path}")
 
 
@@ -242,12 +244,13 @@ def translate(query: str, direction: str = None) -> dict:
     2. Otherwise retrieve from FAISS + generate via Ollama
     """
     # --- Correction lookup (highest priority) ---
-    if direction:
-        correction = check_correction(query, direction)
+    directions_to_check = [direction] if direction else ["en_to_igbo", "igbo_to_en"]
+    for d in directions_to_check:
+        correction = check_correction(query, d)
         if correction:
             return {
                 "query": query,
-                "direction": direction,
+                "direction": d,
                 "response": f"1. {correction}\n2. High\n3. Verified correction from feedback.",
                 "retrieval_quality": "correction",
                 "citations": []

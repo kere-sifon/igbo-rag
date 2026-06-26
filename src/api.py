@@ -121,7 +121,7 @@ async def translate_text(request: TranslateRequest) -> TranslateResponse:
         raise HTTPException(status_code=422, detail="query must not be empty")
 
     start = time.perf_counter()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None, partial(translate, request.query, direction=request.direction)
     )
