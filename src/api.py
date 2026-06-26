@@ -30,12 +30,14 @@ CORRECTIONS_PATH = os.getenv("CORRECTIONS_PATH",
 APP_NAME = "Igbo-English RAG Translator"
 APP_VERSION = "1.0.0"
 
+_cors_origins_env = os.getenv("CORS_ORIGINS", "")
+CORS_ORIGINS = [o.strip() for o in _cors_origins_env.split(",") if o.strip()] or ["*"]
+
 app = FastAPI(title=APP_NAME, version=APP_VERSION)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
