@@ -28,6 +28,15 @@ print(f"FAISS index ready: {_faiss_index.ntotal:,} vectors")
 # --- Corrections store — loaded from file + updated live ---
 _corrections: dict = {}  # key: "query||direction", value: correct_translation
 
+# Baseline corrections baked in at install time; user feedback overrides these.
+_DEFAULT_CORRECTIONS: dict = {
+    "please sit down||en_to_igbo":  "Biko nọdụ ala",
+    "biko nọdụ ala||igbo_to_en":    "Please sit down",
+    "i miss you||en_to_igbo":       "A chefuo m gị",
+    "my name is||en_to_igbo":       "Aha m bụ",
+    "come and eat||en_to_igbo":     "Bịa rie nri",
+}
+
 
 def load_corrections(path: str = CORRECTIONS_PATH):
     """
@@ -154,9 +163,23 @@ def assess_retrieval_quality(pairs: list) -> str:
         return "low"
 
 
+def format_corrections_for_prompt() -> str:
+    """Build the CRITICAL CORRECTIONS block from live store, falling back to defaults."""
+    merged = {**_DEFAULT_CORRECTIONS, **_corrections}
+    if not merged:
+        return ""
+    lines = ["CRITICAL CORRECTIONS — always use these exact translations, no exceptions:"]
+    for key, translation in merged.items():
+        query, _ = key.rsplit("||", 1)
+        lines.append(f'    "{query}" = "{translation}"')
+    return "\n".join(lines)
+
+
 def build_messages(retrieval_quality: str, context: str, query: str):
+    corrections_block = format_corrections_for_prompt()
+
     if retrieval_quality in ("low", "no_matches"):
-        system_msg = """You are an expert Igbo-English translator with deep knowledge of
+        system_msg = f"""You are an expert Igbo-English translator with deep knowledge of
 formal Igbo as spoken in southeastern Nigeria (Owerri, Onitsha, Enugu dialects).
 
 IMPORTANT: The corpus examples are LOW QUALITY or not relevant.
@@ -167,12 +190,7 @@ Rules:
 - Never use transliterated English as Igbo
 - Keep response concise: translation, confidence, one-line note
 
-CRITICAL CORRECTIONS — always use these exact translations, no exceptions:
-    "Please sit down"       = "Biko nọdụ ala"  (nọdụ = sit, ala = down/ground)
-    "Biko nọdụ ala"         = "Please sit down" (NOT calm down, NOT arrived on Earth)
-    "I miss you"            = "A chefuo m gị"   (NOT Agụụ which means hunger)
-    "My name is [X]"        = "Aha m bụ [X]"    (m = my, NOT ya = his/her)
-    "Come and eat"          = "Bịa rie nri"
+{corrections_block}
 
 Common reference phrases:
     Daalụ / Imeela          = Thank you
@@ -192,14 +210,12 @@ Common reference phrases:
     A chefuo m gị           = I miss you
     Amara m                 = Congratulations"""
     else:
-        system_msg = """You are an expert Igbo-English translator.
+        system_msg = f"""You are an expert Igbo-English translator.
 Use the corpus examples to ground your translation.
 If examples are noisy, use your own knowledge instead.
 Keep response concise: translation, confidence, one-line note.
 
-CRITICAL CORRECTIONS — always use these exact translations, no exceptions:
-    "Biko nọdụ ala"  = "Please sit down" (NOT arrived on Earth, NOT calm down)
-    "My name is [X]" = "Aha m bụ [X]"    (m = my, NOT ya = his/her)"""
+{corrections_block}"""
 
     user_msg = f"""Corpus examples:
 {context}
