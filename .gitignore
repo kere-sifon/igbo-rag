@@ -3,6 +3,12 @@
 .env.local
 .env.*.local
 
+# Secrets
+.webui_secret_key
+*.pem
+*.key
+*credentials*.json
+
 # Python
 __pycache__/
 *.py[cod]

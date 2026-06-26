@@ -30,6 +30,11 @@ query
   → quality-aware prompt routing (grounded vs fallback)
   → Qwen2.5:7B via Ollama (temperature 0.1)
   → FastAPI response { translation, retrieval_quality, citations, latency_ms }
+
+Persistence layer (MongoDB Atlas):
+  feedback collection  — HITL corrections (query, direction, correct_translation,
+                         wrong_translation, note, created_at, reingested)
+  evals collection     — RAGAS run snapshots for score-drift tracking
 ```
 
 ## Key files
@@ -38,6 +43,7 @@ query
 |---|---|
 | `src/rag_pipeline.py` | Core RAG logic — embed, retrieve, prompt, generate |
 | `src/api.py` | FastAPI endpoints — translate, feedback, health |
+| `src/db.py` | MongoDB client — corrections + eval persistence |
 | `src/eval.py` | RAGAS evaluation suite |
 | `src/run.py` | Uvicorn entry point with hot reload |
 | `scripts/build_faiss_index.py` | One-time index build from nllb_train.jsonl |
@@ -46,8 +52,10 @@ query
 
 **Corrections store** (`_corrections` in `rag_pipeline.py`):
 - Key format: `"query_lowercase||direction"` (e.g. `"i miss you||en_to_igbo"`)
-- `load_corrections()` does an atomic swap — builds a new dict, then replaces in one assignment. Never mutate `_corrections` in place.
-- `_DEFAULT_CORRECTIONS` provides baseline corrections that `_corrections` overrides. Both are merged in `format_corrections_for_prompt()` before every LLM call. Do not add corrections in both places.
+- **Source of truth is MongoDB** (`feedback` collection via `db.py`). The in-memory dict is a read-through cache rebuilt on startup and after every `POST /feedback`.
+- `load_corrections()` does an atomic swap — builds a new dict from MongoDB, then replaces in one assignment. Never mutate `_corrections` in place.
+- `_DEFAULT_CORRECTIONS` provides baseline corrections that `_corrections` overrides. Both are merged in `format_corrections_for_prompt()` before every LLM call.
+- MongoDB connection failure at startup is non-fatal: the API stays up using defaults only, and a WARNING is printed. Fix the connection and restart to restore persistence.
 
 **FAISS ↔ metadata sync** (`build_faiss_index.py`):
 - `all_embeddings[i]` must always correspond to `embedded_pairs[i]`. The build script maintains these in lockstep — extend both on batch success, skip both on failure.
@@ -69,7 +77,9 @@ LLM_MODEL         # default: Qwen2.5:7B
 EMBED_MODEL       # default: nomic-embed-text
 FAISS_INDEX_PATH  # required — path to igbo_faiss.index
 FAISS_META_PATH   # required — path to igbo_metadata.json
-CORRECTIONS_PATH  # default: ~/projects/igbo-rag/data/corrections.jsonl
+CORRECTIONS_PATH  # optional — path for JSONL backup (no longer primary store)
+MONGODB_URI       # default: mongodb://localhost:27017  (Atlas URI for prod)
+MONGODB_DB        # default: igbo_rag
 CORS_ORIGINS      # comma-separated; defaults to * for local dev
 ```
 

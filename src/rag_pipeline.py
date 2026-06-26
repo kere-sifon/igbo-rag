@@ -15,6 +15,8 @@ FAISS_INDEX_PATH = os.getenv("FAISS_INDEX_PATH",
     os.path.expanduser("~/projects/igbo-rag/data/igbo_faiss.index"))
 FAISS_META_PATH = os.getenv("FAISS_META_PATH",
     os.path.expanduser("~/projects/igbo-rag/data/igbo_metadata.json"))
+
+# Kept for optional JSONL export / backup — no longer the primary store.
 CORRECTIONS_PATH = os.getenv("CORRECTIONS_PATH",
     os.path.expanduser("~/projects/igbo-rag/data/corrections.jsonl"))
 
@@ -25,7 +27,7 @@ with open(FAISS_META_PATH, "r", encoding="utf-8") as f:
     _metadata = json.load(f)
 print(f"FAISS index ready: {_faiss_index.ntotal:,} vectors")
 
-# --- Corrections store — loaded from file + updated live ---
+# --- Corrections store — hot path dict, backed by MongoDB ---
 _corrections: dict = {}  # key: "query||direction", value: correct_translation
 
 # Baseline corrections baked in at install time; user feedback overrides these.
@@ -38,30 +40,34 @@ _DEFAULT_CORRECTIONS: dict = {
 }
 
 
-def load_corrections(path: str = CORRECTIONS_PATH):
+def load_corrections(path: str = None):
     """
-    Load corrections from JSONL file into _corrections dict.
-    Called at startup and after every new feedback submission.
-    Takes effect immediately — no restart needed.
+    Rebuild the in-memory _corrections dict from MongoDB.
+
+    MongoDB is the primary source of truth.  The `path` argument is
+    accepted for backwards-compatibility but is no longer used.
+
+    Falls back to an empty dict (plus _DEFAULT_CORRECTIONS) if MongoDB
+    is unavailable — the API stays up, corrections just won't persist
+    until the connection is restored.
     """
     global _corrections
-    new_corrections = {}
-    if not os.path.exists(path):
-        _corrections = new_corrections
-        return
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
+    try:
+        from db import load_all_corrections
+        rows = load_all_corrections()
+        new_corrections = {}
+        for c in rows:
             try:
-                c = json.loads(line)
                 key = f"{c['query'].lower().strip()}||{c['direction']}"
                 new_corrections[key] = c["correct_translation"]
-            except (json.JSONDecodeError, KeyError):
+            except KeyError:
                 continue
-    _corrections = new_corrections
-    print(f"Loaded {len(_corrections)} corrections from {path}")
+        _corrections = new_corrections
+        print(f"Loaded {len(_corrections)} corrections from MongoDB")
+    except Exception as exc:
+        print(f"WARNING: could not load corrections from MongoDB ({exc}). "
+              "Using defaults only.")
+        _corrections = {}
 
 
 # Load corrections at startup
@@ -271,14 +277,14 @@ def translate(query: str, direction: str = None) -> dict:
             return {
                 "query": query,
                 "direction": d,
-                "response": f"1. {correction}\n2. High\n3. Verified correction from feedback.",
+                "response": correction,  # clean translation only, no numbered format
                 "retrieval_quality": "correction",
                 "citations": []
             }
 
     # --- Normal RAG pipeline ---
     pairs = retrieve_translation_pairs(
-        query, direction, n_results=5, distance_threshold=0.70
+        query, direction, n_results=5, similarity_threshold=0.70
     )
 
     retrieval_quality = assess_retrieval_quality(pairs)
