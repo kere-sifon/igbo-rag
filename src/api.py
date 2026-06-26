@@ -68,7 +68,7 @@ class Citation(BaseModel):
     input: str
     output: str
     direction: str
-    distance: float
+    similarity: float
 
 
 class TranslateResponse(BaseModel):

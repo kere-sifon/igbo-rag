@@ -96,35 +96,39 @@ def retrieve_translation_pairs(
     query: str,
     direction: str = None,
     n_results: int = 5,
-    distance_threshold: float = 0.70
+    similarity_threshold: float = 0.70
 ):
-    """Retrieve the most relevant translation pairs using FAISS."""
+    """Retrieve the most relevant translation pairs using FAISS.
+
+    FAISS IndexFlatIP on L2-normalised vectors returns cosine similarity
+    scores in [0, 1] — higher means more similar.
+    """
     fetch_k = n_results * 8 if direction else n_results * 4
     fetch_k = min(fetch_k, _faiss_index.ntotal)
 
     vec = embed_query(query)
-    distances, indices = _faiss_index.search(vec, fetch_k)
+    scores, indices = _faiss_index.search(vec, fetch_k)
 
     pairs = []
-    for dist, idx in zip(distances[0], indices[0]):
+    for sim, idx in zip(scores[0], indices[0]):
         if idx < 0 or idx >= len(_metadata):
             continue
         m = _metadata[idx]
         if direction and m.get("direction") != direction:
             continue
-        if dist < distance_threshold:
+        if sim < similarity_threshold:
             continue
         pairs.append({
             "input": m["input"],
             "output": m["output"],
             "direction": m["direction"],
-            "distance": float(1.0 - dist)
+            "similarity": float(sim)
         })
         if len(pairs) >= n_results:
             break
 
     if not pairs:
-        for dist, idx in zip(distances[0], indices[0]):
+        for sim, idx in zip(scores[0], indices[0]):
             if idx < 0 or idx >= len(_metadata):
                 continue
             m = _metadata[idx]
@@ -134,7 +138,7 @@ def retrieve_translation_pairs(
                 "input": m["input"],
                 "output": m["output"],
                 "direction": m["direction"],
-                "distance": float(1.0 - dist)
+                "similarity": float(sim)
             })
             if len(pairs) >= min(3, n_results):
                 break
@@ -154,10 +158,10 @@ def format_context(pairs: list) -> str:
 def assess_retrieval_quality(pairs: list) -> str:
     if not pairs:
         return "no_matches"
-    best_distance = pairs[0]["distance"]
-    if best_distance < 0.08:
+    best_similarity = pairs[0]["similarity"]
+    if best_similarity > 0.92:
         return "high"
-    elif best_distance < 0.10:
+    elif best_similarity > 0.90:
         return "medium"
     else:
         return "low"

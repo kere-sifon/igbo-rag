@@ -62,7 +62,7 @@ def citations_to_contexts(citations: list) -> list[str]:
         return ["No close matches found in corpus."]
     return [
         f"[{c['direction']}] \"{c['input']}\" → \"{c['output']}\" "
-        f"(distance: {c['distance']:.4f})"
+        f"(similarity: {c['similarity']:.4f})"
         for c in citations
     ]
 
