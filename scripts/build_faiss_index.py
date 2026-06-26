@@ -154,59 +154,68 @@ def main():
     print()
 
     # --- Step 2: Embed in batches ---
+    # Three checkpoint files kept in sync:
+    #   igbo_embeddings.npy          — raw embedding vectors
+    #   igbo_metadata_checkpoint.json — pairs that were successfully embedded
+    #   igbo_checkpoint_state.json   — next source index to process (so failed
+    #                                  batches don't cause pairs/embeddings to
+    #                                  drift out of sync on resume)
     checkpoint_path = os.path.join(OUTPUT_DIR, "igbo_embeddings.npy")
     meta_checkpoint_path = os.path.join(OUTPUT_DIR, "igbo_metadata_checkpoint.json")
+    state_checkpoint_path = os.path.join(OUTPUT_DIR, "igbo_checkpoint_state.json")
 
-    # Resume from checkpoint if available
-    if os.path.exists(checkpoint_path) and os.path.exists(meta_checkpoint_path):
-        print(f"Checkpoint found — loading embeddings from {checkpoint_path}")
+    all_embeddings = []
+    embedded_pairs = []  # always parallel to all_embeddings
+    next_idx = 0         # position in the source `pairs` list
+
+    if (os.path.exists(checkpoint_path)
+            and os.path.exists(meta_checkpoint_path)
+            and os.path.exists(state_checkpoint_path)):
+        print(f"Checkpoint found — resuming from {checkpoint_path}")
         all_embeddings = np.load(checkpoint_path).tolist()
         with open(meta_checkpoint_path, "r") as f:
-            pairs = json.load(f)
-        print(f"Resumed: {len(all_embeddings):,} embeddings already computed")
-        start_idx = len(all_embeddings)
-    else:
-        all_embeddings = []
-        start_idx = 0
+            embedded_pairs = json.load(f)
+        with open(state_checkpoint_path, "r") as f:
+            next_idx = json.load(f)["next_idx"]
+        print(f"Resumed: {len(all_embeddings):,} embeddings, next source idx {next_idx:,}")
 
-    if start_idx < len(pairs):
-        print(f"Embedding {len(pairs) - start_idx:,} remaining pairs with {EMBED_MODEL}...")
+    def _save_checkpoint(next_source_idx: int) -> None:
+        np.save(checkpoint_path, np.array(all_embeddings, dtype=np.float32))
+        with open(meta_checkpoint_path, "w") as f:
+            json.dump(embedded_pairs, f, ensure_ascii=False)
+        with open(state_checkpoint_path, "w") as f:
+            json.dump({"next_idx": next_source_idx}, f)
+
+    if next_idx < len(pairs):
+        print(f"Embedding {len(pairs) - next_idx:,} remaining pairs with {EMBED_MODEL}...")
         start = time.time()
+        embedded_at_start = len(all_embeddings)
 
-        for i in range(start_idx, len(pairs), BATCH_SIZE):
+        for i in range(next_idx, len(pairs), BATCH_SIZE):
             batch_pairs = pairs[i:i + BATCH_SIZE]
             texts = [f"{p['input']} | {p['output']}" for p in batch_pairs]
             try:
                 embeddings = embed_batch(texts)
                 all_embeddings.extend(embeddings)
+                embedded_pairs.extend(batch_pairs)
             except Exception as e:
                 print(f"  Batch {i//BATCH_SIZE} failed: {e} — skipping")
-                continue
 
             done = len(all_embeddings)
             if (i // BATCH_SIZE) % 20 == 0:
                 elapsed = time.time() - start
-                rate = (done - start_idx) / elapsed if elapsed > 0 else 0
-                remaining = len(pairs) - done
+                rate = (done - embedded_at_start) / elapsed if elapsed > 0 else 0
+                remaining = len(pairs) - (i + BATCH_SIZE)
                 eta = remaining / rate if rate > 0 else 0
-                print(f"  [{done:,}/{len(pairs):,}] "
-                      f"{elapsed:.0f}s elapsed | "
-                      f"{rate:.0f} pairs/s | "
-                      f"ETA: {eta/60:.1f} min")
+                print(f"  [{done:,} embedded / {i + BATCH_SIZE:,} processed / {len(pairs):,} total] "
+                      f"{elapsed:.0f}s | {rate:.0f} pairs/s | ETA {eta/60:.1f} min")
 
-            # Save checkpoint every 5000 pairs
             if done % 5000 == 0 and done > 0:
-                np.save(checkpoint_path, np.array(all_embeddings, dtype=np.float32))
-                with open(meta_checkpoint_path, "w") as f:
-                    json.dump(pairs, f, ensure_ascii=False)
+                _save_checkpoint(i + BATCH_SIZE)
 
         print(f"\nEmbedding complete: {len(all_embeddings):,} vectors in "
               f"{time.time()-start:.0f}s")
-
-        # Save final checkpoint
-        np.save(checkpoint_path, np.array(all_embeddings, dtype=np.float32))
-        with open(meta_checkpoint_path, "w") as f:
-            json.dump(pairs, f, ensure_ascii=False)
+        _save_checkpoint(len(pairs))
 
     # --- Step 3: Build FAISS index ---
     print("\nBuilding FAISS index...")
@@ -214,7 +223,6 @@ def main():
     print(f"Embeddings shape: {embeddings_np.shape}")
     print(f"Using detected dim: {embed_dim}")
 
-    # Verify shape matches detected dim
     actual_dim = embeddings_np.shape[1]
     if actual_dim != embed_dim:
         print(f"Warning: detected dim {embed_dim} != actual dim {actual_dim}, using actual")
@@ -234,16 +242,15 @@ def main():
 
     faiss.write_index(index, index_path)
     with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(pairs[:index.ntotal], f, ensure_ascii=False)
+        json.dump(embedded_pairs, f, ensure_ascii=False)
 
     index_size_mb = os.path.getsize(index_path) / (1024**2)
     meta_size_mb = os.path.getsize(meta_path) / (1024**2)
 
     # Clean up checkpoints
-    if os.path.exists(checkpoint_path):
-        os.remove(checkpoint_path)
-    if os.path.exists(meta_checkpoint_path):
-        os.remove(meta_checkpoint_path)
+    for cp in (checkpoint_path, meta_checkpoint_path, state_checkpoint_path):
+        if os.path.exists(cp):
+            os.remove(cp)
 
     print(f"\nSaved:")
     print(f"  FAISS index : {index_path} ({index_size_mb:.1f} MB)")
