@@ -193,7 +193,11 @@ def main():
 
         for i in range(next_idx, len(pairs), BATCH_SIZE):
             batch_pairs = pairs[i:i + BATCH_SIZE]
-            texts = [f"{p['input']} | {p['output']}" for p in batch_pairs]
+            # Embed the searchable key only — the source `input` phrase — with
+            # the nomic search_document prefix. Queries embed "search_query: {q}"
+            # (see src/rag_pipeline.embed_query). Embedding "input | output" here
+            # breaks retrieval because queries never contain the output side.
+            texts = [f"search_document: {p['input']}" for p in batch_pairs]
             try:
                 embeddings = embed_batch(texts)
                 all_embeddings.extend(embeddings)

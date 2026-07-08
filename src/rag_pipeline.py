@@ -81,10 +81,16 @@ def check_correction(query: str, direction: str) -> str | None:
 
 
 def embed_query(text: str) -> np.ndarray:
-    """Embed a query string using nomic-embed-text via Ollama."""
+    """Embed a query string using nomic-embed-text via Ollama.
+
+    nomic-embed-text is trained with task prefixes: queries must use
+    ``search_query:`` and documents ``search_document:``. The index is built
+    on the source ``input`` phrase only (see scripts/reembed_index.py), so we
+    embed the raw query here — never the bilingual pair.
+    """
     payload = json.dumps({
         "model": EMBED_MODEL,
-        "prompt": text
+        "prompt": f"search_query: {text}"
     }).encode("utf-8")
     req = urllib.request.Request(
         f"{OLLAMA_BASE_URL}/api/embeddings",
@@ -162,6 +168,15 @@ def format_context(pairs: list) -> str:
 
 
 def assess_retrieval_quality(pairs: list) -> str:
+    # NOTE: On the current corpus, cosine similarity is NOT monotonic with
+    # relevance — measured example: the noise pair for "A hụrụ m gị n'anya"
+    # scores 0.856 while the correct pair for "I love you" scores only 0.822.
+    # So no similarity threshold can reliably gate grounding: lowering it grounds
+    # the model on noise and degrades translations (e.g. "You loved me"), while
+    # the conservative thresholds below route short/common phrases to the
+    # knowledge + curated-reference path, which is more accurate here.
+    # Reliable grounding requires a reranking layer (see README "next"); until
+    # then these thresholds intentionally keep grounding conservative.
     if not pairs:
         return "no_matches"
     best_similarity = pairs[0]["similarity"]

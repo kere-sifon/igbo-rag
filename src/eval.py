@@ -18,11 +18,16 @@ from ragas.metrics._faithfulness import faithfulness
 from ragas.run_config import RunConfig
 
 from rag_pipeline import OLLAMA_BASE_URL, LLM_MODEL, translate
+from db import save_eval_run
 
 load_dotenv()
 
 EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
-JUDGE_MODEL = os.getenv("LLM_MODEL", LLM_MODEL)
+# Judge model is decoupled from the translation model: the pipeline translates
+# with LLM_MODEL, but RAGAS scoring is more reliable with a stronger reasoner.
+# Override with RAGAS_JUDGE_MODEL (e.g. deepseek-r1:14b) without changing the
+# model the pipeline actually uses to translate.
+JUDGE_MODEL = os.getenv("RAGAS_JUDGE_MODEL", os.getenv("LLM_MODEL", LLM_MODEL))
 RESULTS_PATH = Path(__file__).resolve().parent.parent / "eval_results.json"
 
 THINKING_PATTERN = re.compile(
@@ -203,6 +208,12 @@ def main() -> None:
 
     RESULTS_PATH.write_text(json.dumps(results, indent=2, ensure_ascii=False) + "\n")
     print(f"\nFull results saved to {RESULTS_PATH}")
+
+    try:
+        save_eval_run(results)
+        print("Snapshot saved to MongoDB (evals collection) — /ops will pick this up.")
+    except Exception as exc:
+        print(f"Warning: could not save eval run to MongoDB: {exc}")
 
 
 if __name__ == "__main__":

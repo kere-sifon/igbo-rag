@@ -122,8 +122,10 @@ def main():
         correct_translation = correction["correct_translation"].strip()
         direction = correction["direction"]
 
-        # Format exactly as build_faiss_index.py does
-        text = f"{query} | {correct_translation}"
+        # Embed the source phrase only, with the nomic search_document prefix —
+        # must match how the main index is built (scripts/reembed_index.py).
+        # The query side embeds "search_query: {query}" (see rag_pipeline).
+        text = f"search_document: {query}"
 
         try:
             embedding = embed_text(text)

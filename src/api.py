@@ -18,6 +18,8 @@ from rag_pipeline import (
     translate,
     load_corrections,
 )
+from ops import router as ops_router
+
 
 load_dotenv()
 
@@ -34,7 +36,7 @@ _cors_origins_env = os.getenv("CORS_ORIGINS", "")
 CORS_ORIGINS = [o.strip() for o in _cors_origins_env.split(",") if o.strip()] or ["*"]
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION)
-
+app.include_router(ops_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,

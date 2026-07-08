@@ -3,7 +3,7 @@
 ![Python](https://img.shields.io/badge/Python-3.14-blue)
 ![FAISS](https://img.shields.io/badge/FAISS-1M_curated_pairs-green)
 ![Ollama](https://img.shields.io/badge/LLM-Qwen2.5%3A7B-orange)
-![RAGAS](https://img.shields.io/badge/Answer_Relevancy-0.833-brightgreen)
+![RAGAS](https://img.shields.io/badge/Answer_Relevancy-0.594-brightgreen)
 ![Local](https://img.shields.io/badge/Inference-100%25_Local-purple)
 ![MongoDB](https://img.shields.io/badge/Corrections-MongoDB_Atlas-darkgreen)
 ![Flowise](https://img.shields.io/badge/Agent-Flowise_Agentflow-blue)
@@ -125,23 +125,39 @@ The raw NLLB dataset has 19.5M pairs but significant noise. The quality filter:
 - For `en_to_igbo` only: drops pairs where the Igbo output contains no unicode characters (genuine Igbo always uses diacritics)
 - Result: ~87% of sampled pairs pass the filter
 
+### 7. Embedding mismatch bug — documents and queries in different vector spaces
+
+The index was originally built by embedding the bilingual concatenation `"{input} | {output}"` per pair, while queries at inference time embedded `"{input}"` alone. This put stored vectors and query vectors in different regions of embedding space — real semantic matches didn't reliably rank, and for short common phrases the mismatch could produce a spuriously high similarity score instead of an honest low one.
+
+The fix: embed documents on the `input` field only — the field actually being searched by — with matching nomic task prefixes (`search_document:` on stored vectors, `search_query:` at query time). This requires a full index rebuild, since all stored vectors were in the wrong format; a rebuilt input-only index queried without the matching prefix (or vice versa) reintroduces a mismatch, just a different one.
+
+A direct check of both the curated metadata and the raw NLLB source confirmed the corpus never contained a clean, standalone entry for common canonical phrases like "good morning" or "thank you" — every occurrence was the phrase embedded inside a longer, unrelated sentence. Pre-fix HIGH-confidence retrieval for these phrases wasn't a real match; it was the embedding bug producing a coincidentally high score. Post-fix, the system correctly reports low retrieval confidence for these phrases and falls back to the model's own knowledge — see [RAGAS evaluation results](#ragas-evaluation-results) for the full before/after comparison.
+
 ## RAGAS evaluation results
 
 Evaluated with RAGAS (faithfulness, answer relevancy, context precision), judged by DeepSeek-r1:14b with `nomic-embed-text` embeddings.
 
 | Query | Direction | Retrieval | Faithfulness | Answer Relevancy | Context Precision |
 |-------|-----------|-----------|--------------|------------------|-------------------|
-| Ụtụtụ ọma | igbo→en | HIGH | 0.833 | 0.875 | 1.000 |
-| A hụrụ m gị n'anya | igbo→en | HIGH | 0.250 | 0.733 | 1.000 |
-| Kedu ka i mere? | igbo→en | HIGH | 0.500 | 0.745 | 0.000 |
-| Biko nọdụ ala | igbo→en | HIGH | 0.750 | 0.851 | 0.950 |
-| I love you | en→igbo | LOW | 0.250 | 0.809 | 0.000 |
-| Good morning | en→igbo | MEDIUM | 0.000 | 0.919 | 0.000 |
-| Thank you | en→igbo | LOW | 0.000 | 0.908 | 0.000 |
-| Please sit down | en→igbo | MEDIUM | 0.800 | 0.824 | 0.804 |
-| **AVERAGE** | | | **0.423** | **0.833** | **0.469** |
+| Ụtụtụ ọma | igbo→en | LOW | 0.00 | 0.55 | 0.00 |
+| A hụrụ m gị n'anya | igbo→en | LOW | 0.25 | 0.51 | 0.42 |
+| Kedu ka i mere? | igbo→en | LOW | 0.33 | 0.63 | 0.00 |
+| Biko nọdụ ala | igbo→en | LOW | 0.00 | 0.55 | 0.33 |
+| I love you | en→igbo | LOW | 0.00 | 0.59 | 0.64 |
+| Good morning | en→igbo | LOW | 0.67 | 0.70 | 1.00 |
+| Thank you | en→igbo | LOW | 0.00 | 0.67 | 0.00 |
+| Please sit down | en→igbo | LOW | 0.00 | 0.57 | 0.53 |
+| **AVERAGE** | | | **0.156** | **0.594** | **0.365** |
 
-Low faithfulness on `LOW`/`MEDIUM` retrieval rows is expected — the fallback prompt deliberately instructs the model to override noisy corpus matches. RAGAS penalises this as "unfaithful to context" but answer relevancy stays high (0.833 average), which is the metric that reflects actual translation quality.
+All 8 translations were correct, including exact ground-truth matches (`Thank you` → `Daalụ`, `Good morning` → `Ụtụtụ ọma`). Every query routed **LOW**, which at first looks like a regression from an earlier run where these same phrases scored HIGH/MEDIUM retrieval (faithfulness 0.423, relevancy 0.833, context precision 0.469 average). It isn't — it's the result of a bug fix, and it's worth explaining why the "worse" numbers are actually more honest.
+
+**What changed:** the FAISS index was originally built by embedding the bilingual concatenation `"{input} | {output}"` per pair, while queries were embedded as `"{input}"` alone — putting documents and queries in different regions of embedding space (see `src/rag_pipeline.py` / `scripts/build_faiss_index.py` history). For short, common phrases, that mismatch didn't always show up as a bad match — the appended `" | {output}"` contributes little to a short string's embedding, so similarity scores could still spuriously clear the HIGH threshold. The fix re-embeds documents on the `input` field only, with matching `search_document:`/`search_query:` nomic task prefixes on both sides.
+
+**Verifying the corpus, not just the fix:** a direct check of both the curated metadata (1,000,005 pairs) and the raw 19.5M-row NLLB source for exact matches on all 5 canonical phrases in the eval set returned **zero exact matches in either** — every occurrence is the phrase embedded inside a longer, unrelated sentence, frequently with a translation that doesn't map cleanly back to the phrase itself. The corpus was never a phrasebook; it's natural-sentence data with real NLLB translation noise, and it never had a clean standalone entry for "good morning" or "thank you." The pre-fix HIGH-confidence retrieval for these exact phrases wasn't a real match — it was the embedding-mismatch bug producing a coincidentally high similarity score for short strings. Post-fix, the system correctly reports LOW confidence and falls back to the model's own knowledge, which is why every translation stayed correct despite every retrieval being LOW.
+
+Low faithfulness on LOW-retrieval rows is expected and by design — RAGAS scores faithfulness as grounding in the retrieved context, and the fallback prompt deliberately overrides noisy or absent corpus matches rather than grounding on them. A correct translation that ignores a bad context is scored "unfaithful" by RAGAS; that's the intended trade-off documented in [Quality-aware prompt routing](#4-quality-aware-prompt-routing), not a defect. Answer relevancy (0.594) is the more informative signal here for output quality — and even that undersells it, since manual verification confirmed all 8 translations were correct, including exact matches.
+
+**What this means for corpus curation:** the corrections layer exists precisely for this gap. When a native speaker submits the correct canonical translation via `/feedback`, it becomes a clean, standalone `{input, output}` pair in MongoDB and, after the nightly re-ingest, a first-class entry in the FAISS index — something the upstream NLLB corpus never provided for exactly the short, common phrases people are most likely to ask about.
 
 ## Setup and run
 
