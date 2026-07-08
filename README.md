@@ -40,7 +40,7 @@ igbo-rag FastAPI /translate:
   query
     → correction lookup (_corrections dict — instant, from MongoDB)
     → nomic-embed-text embed (~83ms)
-    → FAISS IndexFlatIP cosine search over 1M pairs (~3ms)
+    → FAISS IndexFlatIP cosine search over 1M pairs (~15ms steady-state)
     → quality assessment (similarity > 0.92 = HIGH, > 0.90 = MEDIUM, else LOW)
     → quality-aware prompt routing (grounded vs fallback)
     → Qwen2.5:7B via Ollama (temperature 0.1)
@@ -92,7 +92,7 @@ The fix was to migrate to FAISS with a curated index extracted from the original
 - Extract and quality-filter 1M pairs from `nllb_train.jsonl`
 - Embed with `nomic-embed-text` (~5 hours one-time cost)
 - Build a normalised `IndexFlatIP` FAISS index (cosine similarity)
-- Result: **~86ms total retrieval** (83ms embed + 3ms search) vs 60–90s with ChromaDB
+- Result: **~98ms steady-state retrieval** (~83ms embed + ~15ms search) vs 60–90s with ChromaDB — a first search after index load pays a one-time warm-up cost of 200–500ms (FAISS/BLAS thread-pool init and paging the index into memory), settling to steady-state after that
 
 ### 2. MongoDB-backed corrections with nightly FAISS re-ingestion
 

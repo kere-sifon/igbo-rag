@@ -3,18 +3,18 @@
   "embed_model": "nomic-embed-text",
   "ollama_base_url": "http://localhost:11434",
   "summary": {
-    "faithfulness": 0.1562,
-    "answer_relevancy": 0.5941,
-    "context_precision": 0.3653
+    "faithfulness": 0.1429,
+    "answer_relevancy": 0.5952,
+    "context_precision": 0.4132
   },
   "queries": [
     {
       "query": "Ụtụtụ ọma",
       "direction": "igbo_to_en",
       "ground_truth": "Good morning",
-      "response": "1. Good morning\n2. High\n3. This is the standard formal greeting for the morning.",
+      "response": "1. Good morning\n2. High\n3. This is a common formal greeting.",
       "retrieval_quality": "low",
-      "latency_ms": 7955.68,
+      "latency_ms": 2562.26,
       "citations": [
         {
           "input": "Damilola Adegbite or Ebube Nwagbo?",
@@ -47,8 +47,8 @@
           "similarity": 0.7988978624343872
         }
       ],
-      "faithfulness": 0.0,
-      "answer_relevancy": 0.5534776307244088,
+      "faithfulness": null,
+      "answer_relevancy": 0.5785520054872505,
       "context_precision": 0.0
     },
     {
@@ -57,7 +57,7 @@
       "ground_truth": "I love you",
       "response": "1. I love you\n2. High\n3. This is a direct and common translation.",
       "retrieval_quality": "low",
-      "latency_ms": 1121.66,
+      "latency_ms": 1205.08,
       "citations": [
         {
           "input": "Evergate tụrụ m n'anya.",
@@ -90,8 +90,8 @@
           "similarity": 0.8508775234222412
         }
       ],
-      "faithfulness": 0.25,
-      "answer_relevancy": 0.5050786789736171,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.5304216763783726,
       "context_precision": 0.4166666666458333
     },
     {
@@ -100,7 +100,7 @@
       "ground_truth": "How are you?",
       "response": "1. How are you?\n2. High\n3. This is a common formal greeting in Igbo.",
       "retrieval_quality": "low",
-      "latency_ms": 1156.78,
+      "latency_ms": 1767.21,
       "citations": [
         {
           "input": "Gịnị ka chọọchị ụka mbụ mere?",
@@ -133,7 +133,7 @@
           "similarity": 0.810835599899292
         }
       ],
-      "faithfulness": 0.3333333333333333,
+      "faithfulness": 0.0,
       "answer_relevancy": 0.62505774061099,
       "context_precision": 0.0
     },
@@ -143,7 +143,7 @@
       "ground_truth": "Please sit down",
       "response": "1. Please sit down\n2. High\n3. This is an exact translation.",
       "retrieval_quality": "low",
-      "latency_ms": 902.1,
+      "latency_ms": 1230.73,
       "citations": [
         {
           "input": "Obere nkọwa ala ala",
@@ -177,7 +177,7 @@
         }
       ],
       "faithfulness": 0.0,
-      "answer_relevancy": 0.5507770757208972,
+      "answer_relevancy": 0.5464576540365284,
       "context_precision": 0.3333333333
     },
     {
@@ -186,7 +186,7 @@
       "ground_truth": "A hụrụ m gị n'anya",
       "response": "1. M hụrụ gị n'anya\n2. High\n3. This is a direct and common translation.",
       "retrieval_quality": "low",
-      "latency_ms": 1252.54,
+      "latency_ms": 1473.69,
       "citations": [
         {
           "input": "I love you PrevX",
@@ -219,17 +219,17 @@
           "similarity": 0.7999492883682251
         }
       ],
-      "faithfulness": 0.0,
-      "answer_relevancy": 0.5869685386735065,
+      "faithfulness": 0.3333333333333333,
+      "answer_relevancy": 0.5992137363169936,
       "context_precision": 0.6388888888675925
     },
     {
       "query": "Good morning",
       "direction": "en_to_igbo",
       "ground_truth": "Ụtụtụ ọma",
-      "response": "1. Ụtụtụ ọma\n2. High\n3. This is the standard formal greeting for morning.",
+      "response": "1. Ụtụtụ ọma\n2. High\n3. This is the standard formal Igbo greeting for morning.",
       "retrieval_quality": "low",
-      "latency_ms": 1170.9,
+      "latency_ms": 1493.39,
       "citations": [
         {
           "input": "Good morning Sr.",
@@ -262,17 +262,17 @@
           "similarity": 0.8243184089660645
         }
       ],
-      "faithfulness": 0.6666666666666666,
-      "answer_relevancy": 0.6966802192811974,
+      "faithfulness": 0.3333333333333333,
+      "answer_relevancy": 0.6646284571193071,
       "context_precision": 0.9999999999
     },
     {
       "query": "Thank you",
       "direction": "en_to_igbo",
       "ground_truth": "Daalụ",
-      "response": "1. Daalụ\n2. High\n3. This is the standard formal Igbo phrase for thank you.",
+      "response": "1. Daalụ\n2. High\n3. This is a common and correct translation.",
       "retrieval_quality": "low",
-      "latency_ms": 1102.55,
+      "latency_ms": 1050.89,
       "citations": [
         {
           "input": "\"Where ARE you?\"",
@@ -305,17 +305,17 @@
           "similarity": 0.8126208186149597
         }
       ],
-      "faithfulness": 0.0,
-      "answer_relevancy": 0.6680360405804394,
+      "faithfulness": 0.3333333333333333,
+      "answer_relevancy": 0.656563806156691,
       "context_precision": 0.0
     },
     {
       "query": "Please sit down",
       "direction": "en_to_igbo",
       "ground_truth": "Biko nọdụ ala",
-      "response": "1. Biko nọdụ ala\n2. High\n3. This translation is exact and commonly used.",
+      "response": "1. Biko nọdụ ala\n2. High\n3. This is a direct translation using the provided critical correction.",
       "retrieval_quality": "low",
-      "latency_ms": 1125.87,
+      "latency_ms": 1383.16,
       "citations": [
         {
           "input": "ANDY sits down.",
@@ -349,8 +349,8 @@
         }
       ],
       "faithfulness": 0.0,
-      "answer_relevancy": 0.566486380164422,
-      "context_precision": 0.5333333333155555
+      "answer_relevancy": 0.5610322034526253,
+      "context_precision": 0.9166666666361111
     }
   ]
 }

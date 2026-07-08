@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import re
 import sys
@@ -118,7 +119,13 @@ def merge_results(run_meta: list[dict], eval_result) -> dict:
         row = {**meta}
         for name in METRIC_NAMES:
             value = scores.get(name)
-            row[name] = None if value is None else float(value)
+            # RAGAS can emit NaN when the judge fails to extract statements
+            # (common on knowledge-fallback answers scored against noisy
+            # contexts). Treat NaN as missing so it doesn't poison the average.
+            if value is None or (isinstance(value, float) and math.isnan(value)):
+                row[name] = None
+            else:
+                row[name] = float(value)
         queries.append(row)
 
     summary = {}
