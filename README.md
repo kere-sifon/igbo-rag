@@ -18,6 +18,12 @@ This project is personal. I was raised in Igbo land and grew up speaking the lan
 
 Growing up speaking the language also means I can directly evaluate whether the system's output is correct — an advantage most NLP researchers working on low-resource African languages don't have. When the model returns "M m i love ya" instead of "A hụrụ m gị n'anya", I know immediately it's wrong, and I can trace exactly where the pipeline failed.
 
+## Demo
+
+![Correction loop in action](docs/demo.png)
+
+The correction loop working end to end in Open WebUI: `"Where do you go to school?"` initially translates to a LOW-quality `"Ebe one ka ị na-eje Akwụkwọ?"`. Typing `"It should be 'Ebe ole ka i na-eje Akwukwo'"` triggers the Flowise correction path, which saves the fix to MongoDB and confirms it immediately — no restart, no rebuild. A few turns earlier, `"Where is the elephant?"` shows what a phrase looks like *after* it's already been corrected once: retrieval quality reads **CORRECTION** (✅) instead of LOW/MEDIUM/HIGH, meaning it's served straight from the verified corrections dict rather than a FAISS similarity match.
+
 ## Architecture
 
 ```
