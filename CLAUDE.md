@@ -15,6 +15,13 @@ python src/eval.py
 
 # Build FAISS index (one-time, ~5 hours)
 python scripts/build_faiss_index.py /path/to/nllb_train.jsonl
+
+# Weaviate benchmark (optional backend comparison)
+docker compose -f docker-compose.weaviate.yml up -d
+python scripts/weaviate_setup.py
+python scripts/weaviate_ingest.py --from-faiss --limit 100000
+python scripts/weaviate_benchmark.py
+VECTOR_BACKEND=weaviate WEAVIATE_HYBRID=true python src/run.py
 ```
 
 API docs available at `http://localhost:8000/docs` once running.
@@ -42,11 +49,17 @@ Persistence layer (MongoDB Atlas):
 | File | Purpose |
 |---|---|
 | `src/rag_pipeline.py` | Core RAG logic — embed, retrieve, prompt, generate |
+| `src/embeddings.py` | Shared Ollama/nomic-embed-text embedding helper |
+| `src/weaviate_store.py` | Weaviate-backed retrieval backend (benchmark) |
 | `src/api.py` | FastAPI endpoints — translate, feedback, health |
 | `src/db.py` | MongoDB client — corrections + eval persistence |
 | `src/eval.py` | RAGAS evaluation suite |
 | `src/run.py` | Uvicorn entry point with hot reload |
-| `scripts/build_faiss_index.py` | One-time index build from nllb_train.jsonl |
+| `scripts/build_faiss_index.py` | One-time FAISS index build from nllb_train.jsonl |
+| `scripts/weaviate_setup.py` | Create the Weaviate `TranslationPair` collection |
+| `scripts/weaviate_ingest.py` | Ingest pairs into Weaviate (from FAISS or re-embed) |
+| `scripts/weaviate_benchmark.py` | FAISS vs Weaviate retrieval comparison |
+| `scripts/weaviate_validate.py` | Smoke-test the Weaviate stack with embedded Weaviate |
 
 ## Critical invariants
 
@@ -81,6 +94,13 @@ CORRECTIONS_PATH  # optional — path for JSONL backup (no longer primary store)
 MONGODB_URI       # default: mongodb://localhost:27017  (Atlas URI for prod)
 MONGODB_DB        # default: igbo_rag
 CORS_ORIGINS      # comma-separated; defaults to * for local dev
+
+VECTOR_BACKEND    # "faiss" (default) or "weaviate"
+WEAVIATE_HOST     # default: localhost
+WEAVIATE_HTTP_PORT # default: 8081
+WEAVIATE_GRPC_PORT # default: 50052
+WEAVIATE_HYBRID   # "true" to enable vector + BM25 hybrid search
+WEAVIATE_HYBRID_ALPHA # default: 0.5 (0 = keyword, 1 = vector)
 ```
 
 ## Data files (not in git)

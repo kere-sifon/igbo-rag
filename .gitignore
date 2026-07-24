@@ -29,3 +29,6 @@ data/
 
 # Logs
 logs/
+
+# Benchmark outputs
+weaviate_benchmark_results.json

@@ -8,9 +8,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+from embeddings import OLLAMA_BASE_URL, embed_query
+
 LLM_MODEL = os.getenv("LLM_MODEL", "Qwen2.5:7B")
-EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
 FAISS_INDEX_PATH = os.getenv("FAISS_INDEX_PATH",
     os.path.expanduser("~/projects/igbo-rag/data/igbo_faiss.index"))
 FAISS_META_PATH = os.getenv("FAISS_META_PATH",
@@ -19,6 +19,9 @@ FAISS_META_PATH = os.getenv("FAISS_META_PATH",
 # Kept for optional JSONL export / backup — no longer the primary store.
 CORRECTIONS_PATH = os.getenv("CORRECTIONS_PATH",
     os.path.expanduser("~/projects/igbo-rag/data/corrections.jsonl"))
+
+# Backend selection: "faiss" (default) or "weaviate".
+VECTOR_BACKEND = os.getenv("VECTOR_BACKEND", "faiss").lower()
 
 # --- Initialise FAISS index + metadata once at module load ---
 print(f"Loading FAISS index from {FAISS_INDEX_PATH}...")
@@ -80,41 +83,13 @@ def check_correction(query: str, direction: str) -> str | None:
     return _corrections.get(key)
 
 
-def embed_query(text: str) -> np.ndarray:
-    """Embed a query string using nomic-embed-text via Ollama.
-
-    nomic-embed-text is trained with task prefixes: queries must use
-    ``search_query:`` and documents ``search_document:``. The index is built
-    on the source ``input`` phrase only (see scripts/reembed_index.py), so we
-    embed the raw query here — never the bilingual pair.
-    """
-    payload = json.dumps({
-        "model": EMBED_MODEL,
-        "prompt": f"search_query: {text}"
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        f"{OLLAMA_BASE_URL}/api/embeddings",
-        data=payload,
-        headers={"Content-Type": "application/json"}
-    )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        result = json.loads(resp.read())
-        vec = np.array([result["embedding"]], dtype=np.float32)
-        faiss.normalize_L2(vec)
-        return vec
-
-
-def retrieve_translation_pairs(
+def _retrieve_from_faiss(
     query: str,
     direction: str = None,
     n_results: int = 5,
-    similarity_threshold: float = 0.70
+    similarity_threshold: float = 0.70,
 ):
-    """Retrieve the most relevant translation pairs using FAISS.
-
-    FAISS IndexFlatIP on L2-normalised vectors returns cosine similarity
-    scores in [0, 1] — higher means more similar.
-    """
+    """Retrieve the most relevant translation pairs using FAISS."""
     fetch_k = n_results * 8 if direction else n_results * 4
     fetch_k = min(fetch_k, _faiss_index.ntotal)
 
@@ -156,6 +131,36 @@ def retrieve_translation_pairs(
                 break
 
     return pairs
+
+
+def retrieve_translation_pairs(
+    query: str,
+    direction: str = None,
+    n_results: int = 5,
+    similarity_threshold: float = 0.70,
+):
+    """Retrieve the most relevant translation pairs.
+
+    Dispatches to the configured VECTOR_BACKEND ("faiss" or "weaviate").
+    Both backends return cosine similarity scores in [0, 1].
+    """
+    if VECTOR_BACKEND == "weaviate":
+        from weaviate_store import retrieve_translation_pairs as _weaviate_retrieve
+        return _weaviate_retrieve(
+            query,
+            direction=direction,
+            n_results=n_results,
+            similarity_threshold=similarity_threshold,
+            use_hybrid=os.getenv("WEAVIATE_HYBRID", "false").lower() == "true",
+            hybrid_alpha=float(os.getenv("WEAVIATE_HYBRID_ALPHA", "0.5")),
+        )
+
+    return _retrieve_from_faiss(
+        query,
+        direction=direction,
+        n_results=n_results,
+        similarity_threshold=similarity_threshold,
+    )
 
 
 def format_context(pairs: list) -> str:
